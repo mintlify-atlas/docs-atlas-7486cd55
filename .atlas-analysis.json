@@ -1,0 +1,158 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Playwriter",
+  "projectDescription": "Chrome extension and CLI that lets AI agents control your browser using Playwright, with full access to your logins and extensions.",
+  "theme": "aspen",
+  "primaryColor": "#7C3AED",
+  "lightColor": "#A78BFA",
+  "darkColor": "#5B21B6",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/sessions",
+              "concepts/state-management",
+              "concepts/accessibility-snapshots"
+            ]
+          },
+          {
+            "group": "CLI Usage",
+            "pages": [
+              "cli/session-management",
+              "cli/execute-code",
+              "cli/best-practices",
+              "cli/troubleshooting"
+            ]
+          },
+          {
+            "group": "MCP Server",
+            "pages": [
+              "mcp/setup",
+              "mcp/configuration",
+              "mcp/remote-access"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/screen-recording",
+              "advanced/debugging",
+              "advanced/live-editing",
+              "advanced/network-interception"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/working-with-pages",
+              "guides/interaction-patterns",
+              "guides/iframe-handling",
+              "guides/visual-labels"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "CLI Commands",
+            "pages": [
+              "api/cli/session",
+              "api/cli/execute",
+              "api/cli/serve",
+              "api/cli/logfile"
+            ]
+          },
+          {
+            "group": "Runtime API",
+            "pages": [
+              "api/runtime/context-variables",
+              "api/runtime/snapshot",
+              "api/runtime/screenshot",
+              "api/runtime/helpers"
+            ]
+          },
+          {
+            "group": "MCP Tools",
+            "pages": [
+              "api/mcp/execute",
+              "api/mcp/reset"
+            ]
+          },
+          {
+            "group": "Programmatic API",
+            "pages": [
+              "api/programmatic/relay-server",
+              "api/programmatic/cdp-session",
+              "api/programmatic/editor",
+              "api/programmatic/debugger",
+              "api/programmatic/recording"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Resources",
+        "groups": [
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/comparison",
+              "resources/security",
+              "resources/faq",
+              "resources/changelog"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Control your existing Chrome browser with all logins and extensions intact",
+    "CLI tool with stateful sessions for browser automation",
+    "MCP server integration for AI agents (Claude, Cursor, VS Code)",
+    "Full Playwright API access through code execution sandbox",
+    "Accessibility snapshots with visual labels (Vimium-style)",
+    "Efficient screen recording (100x more efficient than Playwright)",
+    "Live JavaScript debugging with breakpoints",
+    "Live code editing in running pages",
+    "Remote browser control over tunnels",
+    "Network request interception and inspection"
+  ],
+  "publicApiSurface": [
+    "playwriter session new",
+    "playwriter session list",
+    "playwriter session reset",
+    "playwriter -s <id> -e <code>",
+    "playwriter serve",
+    "playwriter logfile",
+    "startPlayWriterCDPRelayServer()",
+    "getCdpUrl()",
+    "getCDPSessionForPage()",
+    "Editor class",
+    "Debugger class",
+    "getAriaSnapshot()",
+    "showAriaRefLabels()",
+    "hideAriaRefLabels()",
+    "startRecording()",
+    "stopRecording()",
+    "snapshot({ page })",
+    "screenshotWithAccessibilityLabels({ page })",
+    "getCDPSession({ page })",
+    "getLatestLogs({ page })"
+  ]
+}
