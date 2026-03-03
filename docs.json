@@ -86,7 +86,8 @@
               "api/cli/session",
               "api/cli/execute",
               "api/cli/serve",
-              "api/cli/logfile"
+              "api/cli/logfile",
+              "api/cli/skill"
             ]
           },
           {

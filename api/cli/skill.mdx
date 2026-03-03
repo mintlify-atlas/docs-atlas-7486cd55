@@ -1,0 +1,140 @@
+---
+title: "playwriter skill"
+description: "Print full Playwriter usage instructions for AI agents"
+---
+
+## playwriter skill
+
+Print the complete Playwriter usage instructions and best practices guide. This outputs the full content of the skill.md file which contains comprehensive guidance for AI agents on using Playwriter effectively.
+
+```bash
+playwriter skill
+```
+
+### Output
+
+Prints the complete skill.md content to stdout, including:
+
+- CLI usage patterns and session management
+- Context variables available in code execution (`state`, `page`, `context`, `require`)
+- Best practices for browser automation
+- Interaction feedback loop (observe → act → observe)
+- Common mistakes to avoid
+- Quoting rules for shell commands
+- Working with pages, iframes, and frames
+- Snapshot vs screenshot guidelines
+- Network interception patterns
+- Debugging and troubleshooting tips
+
+### Exit Codes
+
+- `0` - Always succeeds
+
+### Examples
+
+<CodeGroup>
+```bash View full instructions
+playwriter skill
+```
+
+```bash Search for specific topic
+playwriter skill | grep -A 10 "interaction feedback loop"
+```
+
+```bash Save to file
+playwriter skill > playwriter-guide.md
+```
+
+```bash Search for examples
+playwriter skill | grep -B 2 -A 10 "Example:"
+```
+</CodeGroup>
+
+### Use Cases
+
+#### For AI agents
+```bash
+# Get full context about Playwriter usage
+playwriter skill
+
+# AI agents can reference this for:
+# - Understanding available context variables
+# - Learning best practices
+# - Finding code examples
+# - Troubleshooting common issues
+```
+
+#### For documentation
+```bash
+# Extract specific sections
+playwriter skill | sed -n '/## context variables/,/## rules/p'
+```
+
+#### For reference
+```bash
+# Quick lookup of best practices
+playwriter skill | grep -A 20 "## best practices"
+```
+
+### Content Sections
+
+The skill output includes these major sections:
+
+<Accordion title="CLI Usage">
+  - Installation options (npm/pnpm/yarn/bunx)
+  - Session management commands
+  - Execute code with `-e` flag
+  - Quoting rules and multiline code
+  - Debugging with logfile command
+</Accordion>
+
+<Accordion title="Context Variables">
+  - `state` - Session-isolated persistent storage
+  - `page` - Default page reference
+  - `context` - Browser context
+  - `require` - Node.js module loader
+  - Global variables available
+</Accordion>
+
+<Accordion title="Best Practices">
+  - Initialize state.page first
+  - Use multiple execute calls for complex logic
+  - Never close browser/context
+  - Check state after actions
+  - Clean up listeners
+  - Snapshot before screenshot
+  - Use proper wait strategies
+</Accordion>
+
+<Accordion title="Interaction Feedback Loop">
+  - The observe → act → observe pattern
+  - Complete workflow examples
+  - When to wait and retry
+  - Verifying action results
+  - Common mistakes to avoid
+</Accordion>
+
+<Accordion title="Advanced Topics">
+  - Working with iframes and frames
+  - Network request interception
+  - File uploads and downloads
+  - Authentication patterns
+  - Debugging with breakpoints
+  - Live code editing
+</Accordion>
+
+### Related Commands
+
+- [`playwriter logfile`](/api/cli/logfile) - View log file paths for debugging
+- [`playwriter session new`](/api/cli/session) - Create a new session
+- [`playwriter -e`](/api/cli/execute) - Execute code with the patterns from skill
+
+### Notes
+
+<Note>
+The skill.md file is the authoritative source for Playwriter usage. It's updated with each release to reflect the latest best practices and features.
+</Note>
+
+<Tip>
+AI agents using Playwriter should reference this content to understand the full API surface and recommended usage patterns.
+</Tip>
