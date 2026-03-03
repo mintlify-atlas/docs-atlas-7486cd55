@@ -1,0 +1,332 @@
+---
+title: State Management
+description: How Playwriter manages relay state using Zustand for deterministic, testable state transitions
+---
+
+Playwriter's WebSocket relay server uses **Zustand vanilla store** for state management, following a functional, immutable state pattern. All state transitions are pure functions that take current state + event data and return new state.
+
+## Why Zustand?
+
+The relay server manages complex state:
+
+- Multiple extension connections (each with its own tabs and targets)
+- Multiple Playwright clients (MCP, CLI, programmatic API)
+- WebSocket connections, pending CDP requests, timers
+- Reconnection logic when extensions disconnect and reconnect
+
+**Requirements:**
+
+- **Deterministic:** State transitions must be predictable and testable
+- **Pure reducers:** No I/O or side effects inside state transitions
+- **Centralized:** Single source of truth for all relay state
+- **Immutable updates:** Prevent bugs from accidental mutation
+
+Zustand provides a minimal, functional store that meets these requirements without Redux boilerplate.
+
+## State Structure
+
+**Source:** `playwriter/src/relay-state.ts`
+
+```typescript
+export type RelayState = {
+  extensions: Map<string, ExtensionEntry>
+  playwrightClients: Map<string, PlaywrightClient>
+}
+```
+
+### ExtensionEntry
+
+Each connected Chrome extension:
+
+```typescript
+export type ExtensionEntry = {
+  id: string                    // Unique connection ID
+  info: ExtensionInfo            // Browser, email, extension version
+  stableKey: string              // Persistent ID across reconnects
+  connectedTargets: Map<string, ConnectedTarget>  // CDP tabs attached to this extension
+  // Runtime I/O fields (co-located with domain state)
+  ws: WSContext | null           // WebSocket connection
+  pendingRequests: Map<number, ExtensionPendingRequest>  // In-flight CDP requests
+  messageId: number              // CDP message ID counter
+  pingInterval: ReturnType<typeof setInterval> | null  // Keepalive timer
+}
+```
+
+**Design decision:** Runtime resources (WebSocket, timers, callbacks) are stored **in the same map** as domain state. This follows the Zustand centralized-state pattern - all state lives in the store, side effects happen in route handlers.
+
+### ConnectedTarget
+
+Each browser tab controlled by the extension:
+
+```typescript
+export type ConnectedTarget = {
+  sessionId: string              // CDP session ID (e.g. "pw-tab-1")
+  targetId: string               // CDP target ID
+  targetInfo: Protocol.Target.TargetInfo  // URL, title, type
+  frameIds: Set<string>          // Attached iframe CDP sessions
+}
+```
+
+### PlaywrightClient
+
+Each Playwright connection (MCP, CLI, or programmatic):
+
+```typescript
+export type PlaywrightClient = {
+  id: string                     // Unique client ID
+  extensionId: string | null     // Which extension this client is bound to
+  ws: WSContext                  // WebSocket connection to /cdp/:id
+}
+```
+
+## Pure State Transition Functions
+
+All state updates use **pure functions** - no I/O, no side effects, just data in → data out:
+
+```typescript
+/**
+ * Add a new extension connection.
+ * Does NOT remove an existing connection with the same stableKey — that old
+ * connection stays routable until its WebSocket onClose fires and calls
+ * removeExtension(). This preserves in-flight message routing during reconnect.
+ */
+export function addExtension(
+  state: RelayState,
+  {
+    id,
+    info,
+    stableKey,
+    ws,
+  }: {
+    id: string
+    info: ExtensionInfo
+    stableKey: string
+    ws: WSContext | null
+  },
+): RelayState {
+  const newExtensions = new Map(state.extensions)
+  
+  newExtensions.set(id, {
+    id,
+    info,
+    stableKey,
+    connectedTargets: new Map(),
+    ws,
+    pendingRequests: new Map(),
+    messageId: 0,
+    pingInterval: null,
+  })
+  return { ...state, extensions: newExtensions }
+}
+```
+
+**All state transitions return a new state object.** Maps are cloned with `new Map(state.extensions)` before mutation to preserve immutability.
+
+## State Transition Examples
+
+### Adding a Target
+
+When extension attaches to a tab:
+
+```typescript
+export function addTarget(
+  state: RelayState,
+  {
+    extensionId,
+    sessionId,
+    targetId,
+    targetInfo,
+    existingFrameIds,
+  }: {
+    extensionId: string
+    sessionId: string
+    targetId: string
+    targetInfo: Protocol.Target.TargetInfo
+    existingFrameIds?: Set<string>
+  },
+): RelayState {
+  const ext = state.extensions.get(extensionId)
+  if (!ext) {
+    return state  // No-op if extension doesn't exist
+  }
+
+  const existingTarget = ext.connectedTargets.get(sessionId)
+  const newTargets = new Map(ext.connectedTargets)
+  newTargets.set(sessionId, {
+    sessionId,
+    targetId,
+    targetInfo,
+    frameIds: existingFrameIds ?? existingTarget?.frameIds ?? new Set(),
+  })
+
+  const newExtensions = new Map(state.extensions)
+  newExtensions.set(extensionId, { ...ext, connectedTargets: newTargets })
+  return { ...state, extensions: newExtensions }
+}
+```
+
+### Removing an Extension
+
+When WebSocket closes:
+
+```typescript
+export function removeExtension(state: RelayState, { extensionId }: { extensionId: string }): RelayState {
+  if (!state.extensions.has(extensionId)) {
+    return state
+  }
+  const newExtensions = new Map(state.extensions)
+  newExtensions.delete(extensionId)
+
+  // Also remove playwright clients bound to this extension
+  const clientsToRemove = Array.from(state.playwrightClients.values())
+    .filter((client) => client.extensionId === extensionId)
+  if (clientsToRemove.length === 0) {
+    return { ...state, extensions: newExtensions }
+  }
+
+  const newClients = new Map(state.playwrightClients)
+  for (const client of clientsToRemove) {
+    newClients.delete(client.id)
+  }
+  return { ...state, extensions: newExtensions, playwrightClients: newClients }
+}
+```
+
+## Derivation Helpers
+
+Instead of storing derived data, Playwriter uses **derivation functions** that compute values on demand:
+
+```typescript
+/**
+ * Find which extension owns a CDP tab sessionId (e.g. "pw-tab-1").
+ * Linear scan over extensions - with <10 extensions this is negligible.
+ */
+export function findExtensionIdByCdpSession(state: RelayState, cdpSessionId: string): string | null {
+  for (const [connectionId, ext] of state.extensions.entries()) {
+    if (ext.connectedTargets.has(cdpSessionId)) {
+      return connectionId
+    }
+  }
+  return null
+}
+
+/**
+ * Find extension by stableKey. Returns the LAST (newest) match because during
+ * reconnect both old and new connections coexist briefly.
+ */
+export function findExtensionByStableKey(state: RelayState, stableKey: string): ExtensionEntry | undefined {
+  let match: ExtensionEntry | undefined
+  for (const ext of state.extensions.values()) {
+    if (ext.stableKey === stableKey) {
+      match = ext
+    }
+  }
+  return match
+}
+```
+
+**Why derivations instead of caching?**
+
+- Simpler: No cache invalidation logic
+- Correct: Always returns current state
+- Fast enough: Linear scans over 5-10 extensions are negligible
+
+## Side Effects in Route Handlers
+
+**Rule:** Pure state transitions have no I/O. Side effects (WebSocket sends, timers) happen **in route handlers** after state updates.
+
+**Example:** Extension connects:
+
+```typescript
+// WebSocket route handler
+app.ws('/extension', (ws, req) => {
+  const stableKey = /* extract from query params */
+  const id = crypto.randomUUID()
+  
+  // 1. Update state (pure function)
+  relayStore.setState(addExtension(relayStore.getState(), {
+    id,
+    info: { /* ... */ },
+    stableKey,
+    ws,
+  }))
+  
+  // 2. Side effect: start ping interval
+  const pingInterval = setInterval(() => {
+    ws.send(JSON.stringify({ method: 'ping' }))
+  }, 30000)
+  
+  // 3. Update state again with interval handle
+  relayStore.setState(updateExtensionIO(relayStore.getState(), {
+    extensionId: id,
+    pingInterval,
+  }))
+  
+  // 4. Side effect: rebind clients from old connection
+  const oldExt = findExtensionByStableKey(relayStore.getState(), stableKey)
+  if (oldExt && oldExt.id !== id) {
+    relayStore.setState(rebindClientsToExtension(relayStore.getState(), {
+      fromExtensionId: oldExt.id,
+      toExtensionId: id,
+    }))
+  }
+})
+```
+
+## Reconnection Handling
+
+When an extension reconnects (e.g., after relay server restart):
+
+1. Extension connects with same `stableKey` but new `id`
+2. `addExtension()` creates a new entry without removing the old one
+3. `findExtensionByStableKey()` returns the **newest** match (last in iteration order)
+4. Old extension's WebSocket `onClose` fires later, calls `removeExtension()`
+5. In-flight CDP messages continue routing to the old connection until cleanup
+
+**Why keep both?** Prevents message loss during reconnection window. CDP responses may arrive after new connection is established but before old connection closes.
+
+## Testing State Transitions
+
+All state functions are **pure and testable**:
+
+```typescript
+import { test, expect } from 'vitest'
+import { createRelayStore, addExtension, addTarget } from './relay-state'
+
+test('addTarget creates new target entry', () => {
+  let state = createRelayStore().getState()
+  
+  state = addExtension(state, {
+    id: 'ext1',
+    info: {},
+    stableKey: 'stable1',
+    ws: null,
+  })
+  
+  state = addTarget(state, {
+    extensionId: 'ext1',
+    sessionId: 'pw-tab-1',
+    targetId: 'target1',
+    targetInfo: { url: 'https://example.com', title: 'Example', type: 'page' },
+  })
+  
+  const ext = state.extensions.get('ext1')
+  expect(ext?.connectedTargets.has('pw-tab-1')).toBe(true)
+  expect(ext?.connectedTargets.get('pw-tab-1')?.targetInfo.url).toBe('https://example.com')
+})
+```
+
+## Benefits of This Approach
+
+**Deterministic:** State transitions are pure functions - same input always produces same output.
+
+**Testable:** No mocks needed - just call functions with data and assert on returned state.
+
+**Debuggable:** State changes are explicit function calls, easy to trace in logs.
+
+**Maintainable:** No hidden dependencies or global side effects - all logic is local to functions.
+
+## Related
+
+- [Architecture](/concepts/architecture) - How relay server fits into overall system
+- [Sessions](/concepts/sessions) - Session isolation using this state structure

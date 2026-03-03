@@ -1,0 +1,359 @@
+---
+title: Debugging
+description: Set breakpoints, inspect variables, and step through JavaScript code in running web pages
+---
+
+## Overview
+
+The Debugger class provides programmatic access to Chrome DevTools debugging features via CDP. You can:
+
+- Set breakpoints in browser scripts by file URL and line number
+- Pause execution and inspect local variables
+- Step through code (step over, into, out)
+- Evaluate expressions in the current scope
+- Access call stacks and source code context
+- Blackbox framework code to focus on your own scripts
+
+## Quick Start
+
+```js
+const cdp = await getCDPSession({ page: state.page })
+const dbg = createDebugger({ cdp })
+await dbg.enable()
+
+// List available scripts
+const scripts = await dbg.listScripts({ search: 'app' })
+console.log(scripts)
+
+// Set a breakpoint
+const bpId = await dbg.setBreakpoint({ file: scripts[0].url, line: 100 })
+console.log('Breakpoint set:', bpId)
+
+// When paused, inspect state
+if (dbg.isPaused()) {
+  const loc = await dbg.getLocation()
+  console.log('Paused at:', loc.url, 'line', loc.lineNumber)
+  
+  const vars = await dbg.inspectLocalVariables()
+  console.log('Variables:', vars)
+  
+  await dbg.stepOver()
+  await dbg.resume()
+}
+```
+
+## Creating a Debugger
+
+```js
+const cdp = await getCDPSession({ page: state.page })
+const dbg = createDebugger({ cdp })
+await dbg.enable() // Must be called before other methods
+```
+
+The `enable()` method:
+- Enables the Debugger and Runtime CDP domains
+- Resumes execution if the target was started with `--inspect-brk`
+- Waits for scripts to be parsed and ready
+
+## Breakpoints
+
+### Setting Breakpoints
+
+```js
+// Basic breakpoint
+const id = await dbg.setBreakpoint({
+  file: 'https://example.com/app.js',
+  line: 42
+})
+
+// Conditional breakpoint - only pause when userId is 123
+await dbg.setBreakpoint({
+  file: 'https://example.com/app.js',
+  line: 42,
+  condition: 'userId === 123'
+})
+```
+
+**Parameters:**
+- `file` - Script URL (use the URL from `listScripts()`)
+- `line` - Line number (1-based)
+- `condition` - Optional JavaScript expression; only pause when it evaluates to true
+
+**Returns:** Breakpoint ID string for later removal
+
+### Listing Breakpoints
+
+```js
+const breakpoints = dbg.listBreakpoints()
+// [{ id: 'bp-123', file: 'https://example.com/index.js', line: 42 }]
+```
+
+### Removing Breakpoints
+
+```js
+await dbg.deleteBreakpoint({ breakpointId: id })
+
+// Cleanup all breakpoints
+const breakpoints = dbg.listBreakpoints()
+for (const bp of breakpoints) {
+  await dbg.deleteBreakpoint({ breakpointId: bp.id })
+}
+```
+
+## Inspecting Execution State
+
+### Check if Paused
+
+```js
+if (dbg.isPaused()) {
+  const vars = await dbg.inspectLocalVariables()
+}
+```
+
+### Get Current Location
+
+When paused at a breakpoint, get execution location with call stack and source context:
+
+```js
+const location = await dbg.getLocation()
+console.log(location.url)          // 'https://example.com/src/index.js'
+console.log(location.lineNumber)   // 42
+console.log(location.callstack)    // [{ functionName: 'handleRequest', ... }]
+console.log(location.sourceContext)
+// Output:
+//   40: function handleRequest(req) {
+//   41:   const data = req.body
+// > 42:   processData(data)
+//   43: }
+```
+
+**Returns:**
+- `url` - Script URL
+- `lineNumber` - Current line (1-based)
+- `columnNumber` - Current column
+- `callstack` - Array of stack frames with function names, URLs, and positions
+- `sourceContext` - Surrounding source code (±3 lines) with current line marked
+
+### Inspect Variables
+
+```js
+const vars = await dbg.inspectLocalVariables()
+// { myVar: 'hello', count: 42 }
+```
+
+Inspects local variables in the current call frame. Must be paused at a breakpoint.
+
+**Note:** String values over 1000 chars are truncated. Use `evaluate()` for full control.
+
+### Evaluate Expressions
+
+```js
+// When paused, can access local variables
+const result = await dbg.evaluate({ expression: 'localVar + 1' })
+
+// Read a large string that would be truncated in inspectLocalVariables
+const full = await dbg.evaluate({ expression: 'largeStringVar' })
+```
+
+Evaluates JavaScript expressions:
+- When paused: evaluates in the current stack frame scope (access to local variables)
+- Otherwise: evaluates in global scope
+- Values are not truncated
+
+### Inspect Global Variables
+
+```js
+const globals = await dbg.inspectGlobalVariables()
+// ['myGlobal', 'CONFIG']
+```
+
+Returns global lexical scope variable names.
+
+## Stepping Through Code
+
+All stepping methods require the debugger to be paused:
+
+```js
+// Step over to next line (don't enter function calls)
+await dbg.stepOver()
+const newLocation = await dbg.getLocation()
+
+// Step into a function call
+await dbg.stepInto()
+
+// Step out of current function
+await dbg.stepOut()
+
+// Resume execution until next breakpoint
+await dbg.resume()
+```
+
+**Example workflow:**
+
+```js
+await dbg.setBreakpoint({ file: 'https://example.com/app.js', line: 42 })
+
+if (dbg.isPaused()) {
+  await dbg.stepOver()  // Execute line 42, pause at line 43
+  await dbg.stepInto()  // Enter function call on line 43
+  await dbg.stepOut()   // Return to caller
+  await dbg.resume()    // Continue until next breakpoint
+}
+```
+
+## Exception Handling
+
+Configure the debugger to pause on exceptions:
+
+```js
+// Pause only on uncaught exceptions
+await dbg.setPauseOnExceptions({ state: 'uncaught' })
+
+// Pause on all exceptions (caught and uncaught)
+await dbg.setPauseOnExceptions({ state: 'all' })
+
+// Disable pausing on exceptions
+await dbg.setPauseOnExceptions({ state: 'none' })
+```
+
+## Finding Scripts
+
+### List Available Scripts
+
+```js
+// List all scripts
+const scripts = await dbg.listScripts()
+// [{ scriptId: '1', url: 'https://example.com/app.js' }, ...]
+
+// Search for specific files
+const handlers = await dbg.listScripts({ search: 'handler' })
+// [{ scriptId: '5', url: 'https://example.com/handlers.js' }]
+```
+
+Automatically enables the debugger if not already enabled. Returns up to 20 matching scripts.
+
+## Blackboxing Scripts
+
+Blackbox scripts to skip framework/library code when stepping:
+
+```js
+// Skip all node_modules
+await dbg.setBlackboxPatterns({ patterns: ['node_modules'] })
+
+// Skip React and frameworks
+await dbg.setBlackboxPatterns({
+  patterns: [
+    'node_modules/react',
+    'node_modules/react-dom',
+    'node_modules/next',
+    'webpack://',
+  ]
+})
+
+// Skip all third-party scripts
+await dbg.setBlackboxPatterns({ patterns: ['^https://cdn\\.'] })
+
+// Clear all blackbox patterns
+await dbg.setBlackboxPatterns({ patterns: [] })
+```
+
+Blackboxed scripts are:
+- Hidden from the call stack
+- Stepped over automatically when stepping through code
+- Not paused at when stepping
+
+### Managing Blackbox Patterns
+
+```js
+// Add a single pattern
+await dbg.addBlackboxPattern({ pattern: 'node_modules/lodash' })
+
+// Remove a pattern
+await dbg.removeBlackboxPattern({ pattern: 'node_modules/lodash' })
+
+// List current patterns
+const patterns = dbg.listBlackboxPatterns()
+```
+
+## XHR/Fetch Breakpoints
+
+Pause when specific network requests are made:
+
+```js
+// Pause on any request to /api/users
+await dbg.setXHRBreakpoint({ url: '/api/users' })
+
+// Remove the breakpoint
+await dbg.removeXHRBreakpoint({ url: '/api/users' })
+
+// List active XHR breakpoints
+const xhrBps = dbg.listXHRBreakpoints()
+```
+
+## Complete Example
+
+```js
+const cdp = await getCDPSession({ page: state.page })
+const dbg = createDebugger({ cdp })
+await dbg.enable()
+
+// Find scripts and set breakpoint
+const scripts = await dbg.listScripts({ search: 'app' })
+if (scripts.length > 0) {
+  const bpId = await dbg.setBreakpoint({ 
+    file: scripts[0].url, 
+    line: 100,
+    condition: 'userId === 123' // Only pause for specific user
+  })
+  console.log('Breakpoint set:', bpId)
+}
+
+// Blackbox framework code
+await dbg.setBlackboxPatterns({ patterns: ['node_modules', 'webpack://'] })
+
+// Pause on uncaught exceptions
+await dbg.setPauseOnExceptions({ state: 'uncaught' })
+
+// Trigger the code path
+await state.page.click('button#process')
+
+// When paused, inspect and step through
+if (dbg.isPaused()) {
+  const loc = await dbg.getLocation()
+  console.log('Paused at:', loc.url, 'line', loc.lineNumber)
+  console.log('Source:', loc.sourceContext)
+  
+  const vars = await dbg.inspectLocalVariables()
+  console.log('Variables:', vars)
+  
+  const result = await dbg.evaluate({ expression: 'userId' })
+  console.log('userId =', result.value)
+  
+  await dbg.stepOver()
+  await dbg.stepOver()
+  await dbg.resume()
+}
+
+// Cleanup
+const breakpoints = dbg.listBreakpoints()
+for (const bp of breakpoints) {
+  await dbg.deleteBreakpoint({ breakpointId: bp.id })
+}
+```
+
+## Use Cases
+
+**Debugging production issues:**
+- Set breakpoints in minified code to understand execution flow
+- Inspect variable values at specific points
+- Pause on exceptions to see where errors occur
+
+**Understanding third-party code:**
+- Step through library functions to see how they work
+- Inspect internal state of frameworks
+- Blackbox known-good code to focus on problem areas
+
+**Automated testing:**
+- Verify code execution paths
+- Extract runtime state for assertions
+- Debug flaky tests by inspecting variables at failure points

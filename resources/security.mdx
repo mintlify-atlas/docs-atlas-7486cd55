@@ -1,0 +1,226 @@
+---
+title: Security
+description: Understanding Playwriter's security model and design principles
+---
+
+## Security Model
+
+Playwriter is designed with multiple layers of protection to ensure safe browser automation:
+
+### Localhost-Only by Default
+
+The WebSocket relay server binds to `localhost:19988` and only accepts local connections:
+
+- **No external network exposure**: Cannot be accessed from other machines
+- **No remote execution risk**: Malicious websites cannot connect
+- **Local-first design**: All communication stays on your machine
+
+### Origin Validation
+
+The relay server validates WebSocket connection origins:
+
+- **Extension ID whitelist**: Only our official extension IDs can connect
+- **Unforgeable origin**: Browsers cannot spoof the `Origin` header
+- **Blocks unauthorized extensions**: Other Chrome extensions are rejected
+
+```typescript
+// Extension origin validation
+const ALLOWED_ORIGINS = [
+  'chrome-extension://jfeammnjpkecdekppnclgkkffahnhfhe', // Production
+  'chrome-extension://pebbngnfojnignonigcnkdilknapkgid'  // Development
+]
+```
+
+### Explicit User Consent
+
+Automation only works on tabs where you explicitly clicked the extension icon:
+
+- **Per-tab opt-in**: Click the extension icon on each tab you want to automate
+- **Visual indicator**: Extension icon turns green when a tab is connected
+- **Easy disable**: Click again to disconnect and stop automation
+- **No background automation**: Cannot control tabs you haven't explicitly enabled
+
+### Visible Automation
+
+Chrome shows an automation banner on controlled tabs:
+
+- **"Chrome is being controlled by automated test software"**: Clear visual indicator
+- **No stealth mode**: You always know when a tab is under automation
+- **Native Chrome behavior**: Uses standard `chrome.debugger` API automation indicators
+
+### HTTP Route Protection
+
+Privileged HTTP routes (CLI and recording endpoints) are protected against cross-origin attacks:
+
+- **`Sec-Fetch-Site` validation**: Blocks cross-origin browser requests
+- **Content-Type enforcement**: POST requests must use `application/json` to prevent CORS preflight bypass
+- **Token authentication**: Required when `--token` flag is set (remote access mode)
+
+This prevents malicious websites from executing side effects on endpoints like `/cli/execute` even though CORS alone only blocks reading responses.
+
+### Remote Access Security
+
+When using remote access via tunnels, additional protections apply:
+
+<Warning>
+Only use remote access with secure tunnels like [traforo](https://traforo.dev) and always set a strong token.
+</Warning>
+
+**On host machine:**
+
+```bash
+npx -y traforo -p 19988 -t my-machine -- npx -y playwriter serve --token <secret>
+```
+
+**From remote client:**
+
+```bash
+export PLAYWRITER_HOST=https://my-machine-tunnel.traforo.dev
+export PLAYWRITER_TOKEN=<secret>
+playwriter -s 1 -e 'await page.goto("https://example.com")'
+```
+
+- **Token authentication**: `--token` flag requires Bearer token on all requests
+- **HTTPS tunnels**: Use secure tunnels that encrypt traffic
+- **Audit access**: Log files show all commands executed
+- **Revocable tokens**: Change or remove the token to revoke access
+
+See [Remote Access](/mcp/remote-access) for full details.
+
+## What Playwriter Cannot Do
+
+### Cannot Access Non-Enabled Tabs
+
+Even if the extension is installed, tabs where you haven't clicked the icon are completely inaccessible. The extension only sees tabs with green icons.
+
+### Cannot Access Restricted Pages
+
+Chrome security policy prevents extensions from accessing:
+
+- `chrome://` internal pages
+- `chrome-extension://` pages from other extensions
+- Chrome Web Store pages
+- `about:blank` pages (shows black icon, clickable but no content)
+
+### Cannot Execute Without Permission
+
+The MCP server and CLI require:
+
+1. Extension installed and connected to relay server
+2. At least one tab with extension enabled (green icon)
+3. Valid session created via `playwriter session new`
+
+Without these, execution fails with clear error messages.
+
+## Architecture
+
+```
++---------------------+     +-------------------+     +-----------------+
+|   BROWSER           |     |   LOCALHOST       |     |   MCP CLIENT    |
+|                     |     |                   |     |                 |
+|  +---------------+  |     | WebSocket Server  |     |  +-----------+  |
+|  |   Extension   |<--------->  :19988         |     |  | AI Agent  |  |
+|  +-------+-------+  | WS  |                   |     |  +-----------+  |
+|          |          |     |  /extension       |     |        |        |
+|    chrome.debugger  |     |       |           |     |        v        |
+|          v          |     |       v           |     |  +-----------+  |
+|  +---------------+  |     |  /cdp/:id <--------------> |  execute  |  |
+|  | Tab 1 (green) |  |     +-------------------+  WS |  +-----------+  |
+|  | Tab 2 (green) |  |                               |        |        |
+|  | Tab 3 (gray)  |  |     Tab 3 not controlled      |  Playwright API |
++---------------------+     (no extension click)      +-----------------+
+```
+
+- **Extension**: Connects to WebSocket server, controls tabs via `chrome.debugger`
+- **Relay Server**: Localhost-only, validates origins, routes CDP commands
+- **MCP Client**: Connects via WebSocket, sends Playwright commands
+- **Tab 3 (gray)**: Not controlled because user didn't click extension icon
+
+## Best Practices
+
+### Use Session Isolation
+
+Create separate sessions for different tasks:
+
+```bash
+playwriter session new  # Session 1 for task A
+playwriter session new  # Session 2 for task B
+```
+
+Each session has isolated state, preventing cross-contamination.
+
+### Store Sensitive Tokens Securely
+
+When using remote access, store tokens in environment variables or secret managers:
+
+```bash
+# Use environment variables
+export PLAYWRITER_TOKEN=$(cat ~/.secrets/playwriter-token)
+
+# Or use a secret manager
+export PLAYWRITER_TOKEN=$(vault read -field=token secret/playwriter)
+```
+
+Never commit tokens to version control.
+
+### Monitor Log Files
+
+Check relay server logs for unexpected activity:
+
+```bash
+playwriter logfile  # Show log file path
+tail -f ~/.playwriter/relay-server.log
+```
+
+Logs include all CDP commands, WebSocket connections, and errors.
+
+### Review CDP Traffic
+
+Inspect CDP command logs to audit automation:
+
+```bash
+# View CDP traffic by direction and method
+jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
+```
+
+### Use Explicit Page References
+
+Always use `state.page` to avoid ambiguity:
+
+```bash
+playwriter -s 1 -e 'state.page = await context.newPage()'
+playwriter -s 1 -e 'await state.page.goto("https://example.com")'
+```
+
+This prevents accidentally controlling the wrong tab.
+
+## Threat Model
+
+### Protected Against
+
+- **Malicious websites**: Cannot connect to localhost relay server
+- **Other extensions**: Origin validation blocks unauthorized extensions
+- **Unauthorized tabs**: Explicit opt-in required per tab
+- **Cross-origin attacks**: HTTP route protection prevents CSRF-style attacks
+- **Token theft**: Remote access requires explicit token setup
+
+### Not Protected Against
+
+- **Malicious code in execute commands**: Agents can run arbitrary JavaScript in enabled tabs
+- **Physical access**: Someone with access to your machine can control your browser
+- **Compromised agent**: If your AI agent is compromised, it can control enabled tabs
+
+Playwriter trusts that:
+
+1. You trust the AI agent you're using
+2. Your machine is secure (not compromised)
+3. You intentionally enabled specific tabs for automation
+
+## Reporting Security Issues
+
+If you discover a security vulnerability, please report it privately:
+
+- **Email**: [security@playwriter.dev](mailto:security@playwriter.dev)
+- **GitHub**: Use [private vulnerability reporting](https://github.com/remorses/playwriter/security/advisories/new)
+
+Please do not open public issues for security vulnerabilities.

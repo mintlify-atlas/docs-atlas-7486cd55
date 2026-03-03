@@ -1,0 +1,281 @@
+---
+title: Execute Code
+description: Run JavaScript code to control the browser via CLI
+---
+
+Execute Playwright code in a session using the `-e` flag:
+
+```bash
+playwriter -s <sessionId> -e "<code>"
+```
+
+## Required flags
+
+<ParamField path="-s, --session" type="string" required>
+  Session ID (get one with `playwriter session new`). The session's `state` object persists across commands.
+</ParamField>
+
+<ParamField path="-e, --eval" type="string" required>
+  JavaScript code to execute in the browser context
+</ParamField>
+
+## Optional flags
+
+<ParamField path="--timeout" type="number" default="10000">
+  Execution timeout in milliseconds
+</ParamField>
+
+<ParamField path="--host" type="string">
+  Remote relay server host (overrides PLAYWRITER_HOST)
+</ParamField>
+
+<ParamField path="--token" type="string">
+  Authentication token (overrides PLAYWRITER_TOKEN)
+</ParamField>
+
+## Basic examples
+
+### Navigate to a page
+
+```bash
+playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://example.com")'
+```
+
+### Click a button
+
+```bash
+playwriter -s 1 -e 'await state.page.click("button")'
+```
+
+### Get page title
+
+```bash
+playwriter -s 1 -e 'await state.page.title()'
+```
+
+### Take a screenshot
+
+```bash
+playwriter -s 1 -e 'await state.page.screenshot({ path: "screenshot.png", scale: "css" })'
+```
+
+### Get accessibility snapshot
+
+```bash
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+```
+
+## Quoting rules
+
+**Always use single quotes for `-e`** to prevent bash from interpreting special characters:
+
+```bash
+# GOOD: Single quotes protect $, backticks, and backslashes
+playwriter -s 1 -e 'const price = text.match(/\$[\d.]+/)'
+playwriter -s 1 -e 'await state.page.locator(`[id="_r_a_"]`).click()'
+
+# BAD: Double quotes - bash interprets $ and backticks
+playwriter -s 1 -e "const price = text.match(/\$[\d.]+/)"  # BREAKS
+```
+
+**Use double quotes for strings inside JavaScript:**
+
+```bash
+playwriter -s 1 -e 'await state.page.goto("https://example.com")'
+```
+
+## Multiline code
+
+### Heredoc (recommended)
+
+Best for multiline code with complex quoting:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const links = await state.page.$$eval('a', els => els.map(e => e.href));
+console.log('Found', links.length, 'links');
+const price = text.match(/\$[\d.]+/);
+EOF
+)"
+```
+
+The quoted `'EOF'` delimiter disables all bash expansion. Any character works inside, including `$`, backticks, and single quotes.
+
+### $'...' syntax
+
+Alternative for multiline, but beware of escape sequences:
+
+```bash
+playwriter -s 1 -e $'
+const title = await state.page.title();
+const url = state.page.url();
+console.log({ title, url });
+'
+```
+
+<Warning>
+  With `$'...'` syntax, `\n`, `\t`, and `\\` become special characters. This conflicts with JavaScript regex patterns. Use heredoc instead for regex-heavy code.
+</Warning>
+
+### Quoting summary
+
+| Syntax | Bash expansion | Use case |
+|--------|----------------|----------|
+| `'...'` | None | One-liners (best for simple code) |
+| `<<'EOF'` | None | Multiline code (best for complex code) |
+| `$'...'` | `\n`, `\t`, `\'` only | Multiline when you need escape sequences |
+| `"..."` | Full | ❌ Never use for JavaScript code |
+
+## Timeout option
+
+Default timeout is 10 seconds. Increase for long-running operations:
+
+```bash
+# Wait up to 30 seconds
+playwriter -s 1 --timeout 30000 -e 'await state.page.waitForSelector(".slow-element")'
+```
+
+```bash
+# Video processing needs longer timeout
+playwriter -s 1 --timeout 120000 -e 'await createDemoVideo({ recordingPath, durationMs, executionTimestamps })'
+```
+
+## Available variables
+
+All execute calls have access to:
+
+<ParamField path="state" type="object">
+  Object persisted between calls **within your session**. Each session has its own isolated state. Use to store pages, data, listeners.
+</ParamField>
+
+<ParamField path="page" type="Page">
+  A default page (may be shared with other agents). Prefer creating your own page and storing it in `state`.
+</ParamField>
+
+<ParamField path="context" type="BrowserContext">
+  Browser context. Access all pages via `context.pages()`.
+</ParamField>
+
+<ParamField path="require" type="function">
+  Load Node.js modules (e.g., `const fs = require('node:fs')`). ESM `import` is not available.
+</ParamField>
+
+Node.js globals are also available: `setTimeout`, `setInterval`, `fetch`, `URL`, `Buffer`, `crypto`, etc.
+
+## Output and errors
+
+The command prints the result to stdout:
+
+```bash
+$ playwriter -s 1 -e 'await state.page.title()'
+Example Domain
+
+$ playwriter -s 1 -e 'console.log("Hello"); 2 + 2'
+Hello
+4
+```
+
+Errors print to stderr and exit with code 1:
+
+```bash
+$ playwriter -s 1 -e 'await state.page.click(".missing")'
+Error: Timeout 10000ms exceeded.
+```
+
+## Advanced examples
+
+### Store network requests
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+state.requests = [];
+state.page.on('request', req => {
+  if (req.url().includes('/api/')) {
+    state.requests.push({ url: req.url(), method: req.method() });
+  }
+});
+EOF
+)"
+```
+
+### Load file content
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const fs = require('node:fs');
+const content = fs.readFileSync('./data.txt', 'utf-8');
+await state.page.locator('textarea').fill(content);
+EOF
+)"
+```
+
+### Extract data with page.evaluate
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const data = await state.page.evaluate(() => {
+  return Array.from(document.querySelectorAll('.item')).map(el => ({
+    title: el.querySelector('h2')?.textContent,
+    price: el.querySelector('.price')?.textContent
+  }));
+});
+console.log(JSON.stringify(data, null, 2));
+EOF
+)"
+```
+
+### Work with iframes
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const frame = await state.page.locator('iframe').contentFrame();
+await snapshot({ frame });
+EOF
+)"
+```
+
+## Environment variables
+
+<ParamField path="PLAYWRITER_SESSION" type="string">
+  Default session ID (can be overridden with `-s`)
+</ParamField>
+
+<ParamField path="PLAYWRITER_HOST" type="string">
+  Default relay server host (can be overridden with `--host`)
+</ParamField>
+
+<ParamField path="PLAYWRITER_TOKEN" type="string">
+  Authentication token for remote relay servers (can be overridden with `--token`)
+</ParamField>
+
+## Troubleshooting
+
+**"Error: -s/--session is required"**
+
+Create a session first:
+
+```bash
+playwriter session new
+```
+
+Then use the session ID with `-s`.
+
+**"Warning: Extension not connected"**
+
+Click the Playwriter extension icon on any tab. The icon turns green when connected.
+
+**Timeout errors**
+
+Increase the timeout:
+
+```bash
+playwriter -s 1 --timeout 30000 -e '...'
+```
+
+**"Error: Cannot connect to relay server"**
+
+The relay server should start automatically. Check logs:
+
+```bash
+playwriter logfile
+```

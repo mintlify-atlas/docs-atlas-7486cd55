@@ -1,122 +1,136 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Playwriter",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#7C3AED",
+    "light": "#A78BFA",
+    "dark": "#5B21B6"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/remorses/playwriter"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/remorses/playwriter"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/architecture",
+              "concepts/sessions",
+              "concepts/state-management",
+              "concepts/accessibility-snapshots"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "CLI Usage",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "cli/session-management",
+              "cli/execute-code",
+              "cli/best-practices",
+              "cli/troubleshooting"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "MCP Server",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "mcp/setup",
+              "mcp/configuration",
+              "mcp/remote-access"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/screen-recording",
+              "advanced/debugging",
+              "advanced/live-editing",
+              "advanced/network-interception"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/working-with-pages",
+              "guides/interaction-patterns",
+              "guides/iframe-handling",
+              "guides/visual-labels"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "CLI Commands",
             "pages": [
-              "api-reference/introduction"
+              "api/cli/session",
+              "api/cli/execute",
+              "api/cli/serve",
+              "api/cli/logfile"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Runtime API",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/runtime/context-variables",
+              "api/runtime/snapshot",
+              "api/runtime/screenshot",
+              "api/runtime/helpers"
+            ]
+          },
+          {
+            "group": "MCP Tools",
+            "pages": [
+              "api/mcp/execute",
+              "api/mcp/reset"
+            ]
+          },
+          {
+            "group": "Programmatic API",
+            "pages": [
+              "api/programmatic/relay-server",
+              "api/programmatic/cdp-session",
+              "api/programmatic/editor",
+              "api/programmatic/debugger",
+              "api/programmatic/recording"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Resources",
+        "groups": [
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/comparison",
+              "resources/security",
+              "resources/faq",
+              "resources/changelog"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

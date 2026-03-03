@@ -1,0 +1,492 @@
+---
+title: Network Interception
+description: Capture and analyze network requests for scraping, API reverse-engineering, and debugging
+---
+
+## Overview
+
+Network interception allows you to capture HTTP requests and responses as the browser makes them. This is essential for:
+
+- **API reverse-engineering** - Understand how websites communicate with backends
+- **Scraping dynamic content** - Extract data from XHR/fetch calls instead of DOM
+- **Debugging** - See what requests succeed/fail and why
+- **Pagination** - Replay API calls to fetch more data
+
+## Quick Start
+
+```js
+// Store requests and responses in state
+state.requests = []
+state.responses = []
+
+state.page.on('request', (req) => {
+  if (req.url().includes('/api/')) {
+    state.requests.push({
+      url: req.url(),
+      method: req.method(),
+      headers: req.headers()
+    })
+  }
+})
+
+state.page.on('response', async (res) => {
+  if (res.url().includes('/api/')) {
+    try {
+      state.responses.push({
+        url: res.url(),
+        status: res.status(),
+        body: await res.json()
+      })
+    } catch {}
+  }
+})
+```
+
+## Capturing Requests
+
+### Basic Request Capture
+
+```js
+state.requests = []
+
+state.page.on('request', (req) => {
+  state.requests.push({
+    url: req.url(),
+    method: req.method(),
+    headers: req.headers(),
+    postData: req.postData() // For POST/PUT requests
+  })
+})
+
+// Trigger actions that make requests
+await state.page.click('button#load-more')
+await state.page.waitForTimeout(1000)
+
+// Analyze captured requests
+console.log('Captured', state.requests.length, 'requests')
+state.requests.forEach(r => console.log(r.method, r.url))
+```
+
+### Filter by URL Pattern
+
+```js
+state.apiRequests = []
+
+state.page.on('request', (req) => {
+  // Only capture API calls
+  if (req.url().includes('/api/')) {
+    state.apiRequests.push({
+      url: req.url(),
+      method: req.method(),
+      headers: req.headers()
+    })
+  }
+})
+```
+
+### Filter by Resource Type
+
+```js
+state.imageRequests = []
+
+state.page.on('request', (req) => {
+  if (req.resourceType() === 'image') {
+    state.imageRequests.push(req.url())
+  }
+})
+```
+
+**Resource types:** `document`, `stylesheet`, `image`, `media`, `font`, `script`, `xhr`, `fetch`, `websocket`
+
+## Capturing Responses
+
+### Basic Response Capture
+
+```js
+state.responses = []
+
+state.page.on('response', async (res) => {
+  if (res.url().includes('/api/')) {
+    try {
+      state.responses.push({
+        url: res.url(),
+        status: res.status(),
+        headers: res.headers(),
+        body: await res.json() // Or res.text() for non-JSON
+      })
+    } catch {
+      // Response is not JSON
+    }
+  }
+})
+
+// Trigger actions
+await state.page.click('button')
+await state.page.waitForTimeout(2000)
+
+// Analyze responses
+console.log('Captured', state.responses.length, 'API responses')
+state.responses.forEach(r => console.log(r.status, r.url))
+```
+
+### Inspect Response Bodies
+
+```js
+const resp = state.responses.find(r => r.url.includes('users'))
+console.log(JSON.stringify(resp.body, null, 2).slice(0, 2000))
+```
+
+### Check for Errors
+
+```js
+state.page.on('response', async (res) => {
+  if (res.status() >= 400) {
+    console.log('Error:', res.status(), res.url())
+    console.log('Body:', await res.text())
+  }
+})
+```
+
+## Replaying API Calls
+
+Once you've captured a request, you can replay it directly:
+
+```js
+// Capture the initial request
+const { url, headers } = state.requests.find(r => r.url.includes('feed'))
+
+// Replay it to get more data
+const data = await state.page.evaluate(
+  async ({ url, headers }) => {
+    const res = await fetch(url, { headers })
+    return res.json()
+  },
+  { url, headers }
+)
+
+console.log(data)
+```
+
+**Use cases:**
+- Pagination: modify URL parameters to fetch next page
+- Scraping: extract data from API instead of DOM parsing
+- Testing: replay requests with different parameters
+
+## Complete Examples
+
+### Extract Instagram Post Data
+
+```js
+state.page = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage()
+
+// Set up response capture before navigation
+state.responses = []
+state.page.on('response', async (res) => {
+  if (res.url().includes('/graphql/query')) {
+    try {
+      const body = await res.json()
+      state.responses.push({ url: res.url(), body })
+    } catch {}
+  }
+})
+
+// Navigate to post
+await state.page.goto('https://www.instagram.com/p/ABC123/', { waitUntil: 'domcontentloaded' })
+await state.page.waitForTimeout(3000)
+
+// Analyze GraphQL responses
+const postData = state.responses.find(r => r.url.includes('PostPage'))
+if (postData) {
+  console.log(JSON.stringify(postData.body, null, 2))
+}
+
+// Cleanup
+state.page.removeAllListeners('response')
+```
+
+### Scrape Paginated API
+
+```js
+state.page = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage()
+state.requests = []
+
+// Capture initial request
+state.page.on('request', (req) => {
+  if (req.url().includes('/api/items')) {
+    state.requests.push({ url: req.url(), headers: req.headers() })
+  }
+})
+
+await state.page.goto('https://example.com/items')
+await state.page.waitForTimeout(2000)
+
+// Extract pagination pattern
+const firstRequest = state.requests[0]
+console.log('Initial request:', firstRequest.url)
+// Example: https://example.com/api/items?page=1
+
+// Fetch all pages
+const allItems = []
+for (let page = 1; page <= 10; page++) {
+  const url = firstRequest.url.replace(/page=\d+/, `page=${page}`)
+  const data = await state.page.evaluate(
+    async ({ url, headers }) => {
+      const res = await fetch(url, { headers })
+      return res.json()
+    },
+    { url, headers: firstRequest.headers }
+  )
+  allItems.push(...data.items)
+  console.log(`Fetched page ${page}: ${data.items.length} items`)
+}
+
+console.log('Total items:', allItems.length)
+
+// Cleanup
+state.page.removeAllListeners('request')
+```
+
+### Debug Failed Requests
+
+```js
+state.failedRequests = []
+
+state.page.on('requestfailed', (req) => {
+  state.failedRequests.push({
+    url: req.url(),
+    method: req.method(),
+    failure: req.failure().errorText
+  })
+})
+
+state.page.on('response', async (res) => {
+  if (res.status() >= 400) {
+    state.failedRequests.push({
+      url: res.url(),
+      status: res.status(),
+      statusText: res.statusText(),
+      body: await res.text()
+    })
+  }
+})
+
+// Trigger actions
+await state.page.click('button#submit')
+await state.page.waitForTimeout(2000)
+
+// Check for failures
+if (state.failedRequests.length > 0) {
+  console.log('Failed requests:', state.failedRequests)
+}
+
+// Cleanup
+state.page.removeAllListeners('requestfailed')
+state.page.removeAllListeners('response')
+```
+
+### Extract High-Resolution Image URLs
+
+```js
+state.imageUrls = []
+
+state.page.on('response', async (res) => {
+  const url = res.url()
+  if (url.includes('cdn') && /\.(jpg|png|webp)/.test(url)) {
+    state.imageUrls.push(url)
+  }
+})
+
+// Navigate carousel to trigger image loads
+await state.page.click('button[aria-label="Next"]')
+await state.page.waitForTimeout(1000)
+await state.page.click('button[aria-label="Next"]')
+await state.page.waitForTimeout(1000)
+
+console.log('CDN image URLs:', state.imageUrls)
+
+// Download images
+const fs = require('node:fs')
+for (let i = 0; i < state.imageUrls.length; i++) {
+  const resp = await fetch(state.imageUrls[i])
+  const buf = Buffer.from(await resp.arrayBuffer())
+  fs.writeFileSync(`./image-${i}.jpg`, buf)
+}
+
+// Cleanup
+state.page.removeAllListeners('response')
+```
+
+## Best Practices
+
+### Store in State
+
+Always store captured data in `state` to persist across execute calls:
+
+```js
+// Good - survives multiple execute calls
+state.responses = []
+state.page.on('response', async (res) => {
+  state.responses.push(await res.json())
+})
+```
+
+```js
+// Bad - lost after execute call finishes
+const responses = []
+state.page.on('response', async (res) => {
+  responses.push(await res.json())
+})
+```
+
+### Clean Up Listeners
+
+Remove listeners when done to prevent memory leaks:
+
+```js
+// At end of message
+state.page.removeAllListeners('request')
+state.page.removeAllListeners('response')
+state.page.removeAllListeners('requestfailed')
+```
+
+### Filter Early
+
+Only capture what you need:
+
+```js
+// Good - filter in listener
+state.page.on('request', (req) => {
+  if (req.url().includes('/api/')) {
+    state.requests.push(req.url())
+  }
+})
+
+// Bad - capture everything then filter
+state.page.on('request', (req) => {
+  state.requests.push(req.url())
+})
+// Later: state.requests.filter(url => url.includes('/api/'))
+```
+
+### Handle JSON Errors
+
+Not all responses are JSON:
+
+```js
+state.page.on('response', async (res) => {
+  if (res.url().includes('/api/')) {
+    try {
+      state.responses.push(await res.json())
+    } catch {
+      // Response is not JSON, skip or use res.text()
+    }
+  }
+})
+```
+
+### Use for Scraping
+
+Prefer network interception over DOM parsing for dynamic content:
+
+```js
+// Good - extract from API response
+state.page.on('response', async (res) => {
+  if (res.url().includes('/api/posts')) {
+    const data = await res.json()
+    state.posts = data.items
+  }
+})
+
+// Bad - parse DOM (slower, brittle)
+const posts = await state.page.$$eval('.post', els =>
+  els.map(el => ({ title: el.querySelector('h2').textContent, ... }))
+)
+```
+
+## Common Patterns
+
+### Capture All API Calls
+
+```js
+state.apiCalls = []
+state.page.on('request', (req) => {
+  if (req.url().includes('/api/')) {
+    state.apiCalls.push({ method: req.method(), url: req.url() })
+  }
+})
+```
+
+### Wait for Specific Response
+
+```js
+const responsePromise = state.page.waitForResponse(res =>
+  res.url().includes('/api/users') && res.status() === 200
+)
+
+await state.page.click('button#load-users')
+const response = await responsePromise
+const users = await response.json()
+console.log(users)
+```
+
+### Inspect Request/Response Pairs
+
+```js
+state.pairs = []
+
+state.page.on('request', (req) => {
+  if (req.url().includes('/api/')) {
+    state.pairs.push({ request: req.url(), response: null })
+  }
+})
+
+state.page.on('response', async (res) => {
+  if (res.url().includes('/api/')) {
+    const pair = state.pairs.find(p => p.request === res.url() && !p.response)
+    if (pair) {
+      pair.response = { status: res.status(), body: await res.json() }
+    }
+  }
+})
+```
+
+### Extract Authenticated Fetch Credentials
+
+```js
+state.authHeaders = null
+
+state.page.on('request', (req) => {
+  if (req.url().includes('/api/')) {
+    state.authHeaders = req.headers()
+  }
+})
+
+// Later, use captured headers for authenticated fetch
+const data = await state.page.evaluate(
+  async ({ headers }) => {
+    const res = await fetch('https://example.com/api/protected', { headers })
+    return res.json()
+  },
+  { headers: state.authHeaders }
+)
+```
+
+## Why Network Interception?
+
+**Compared to DOM scraping:**
+- **Faster** - No need to wait for DOM rendering
+- **More reliable** - API responses have stable structure
+- **More data** - APIs often return more data than what's displayed
+- **Easier** - JSON parsing is simpler than DOM traversal
+
+**Compared to external HTTP tools (curl, fetch):**
+- **Authenticated** - Requests include session cookies automatically
+- **Dynamic** - Captures requests triggered by JavaScript
+- **Complete** - Sees all requests the page makes
+
+**When to use:**
+- SPAs with lots of AJAX (Instagram, Twitter, Facebook)
+- Infinite scroll / lazy-loaded content
+- Pagination via API calls
+- Protected resources requiring session cookies
+- Understanding how a site works (reverse-engineering)

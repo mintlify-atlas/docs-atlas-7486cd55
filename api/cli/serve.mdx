@@ -1,0 +1,123 @@
+---
+title: "playwriter serve"
+description: "Start the relay server for remote access"
+---
+
+## playwriter serve
+
+Start the relay server on this machine (must be the same host where Chrome is running). Remote clients (Docker, other machines) connect via `PLAYWRITER_HOST`.
+
+```bash
+playwriter serve
+playwriter serve --host localhost
+playwriter serve --host 0.0.0.0 --token your-secret-token
+```
+
+### Options
+
+<ParamField path="--host" type="string" default="0.0.0.0">
+  Host to bind to:
+  - `localhost` - For Docker access via host.docker.internal (no token needed)
+  - `0.0.0.0` - For LAN/internet access (requires `--token`)
+</ParamField>
+
+<ParamField path="--token" type="string">
+  Authentication token, required when `--host` is `0.0.0.0` (or use `PLAYWRITER_TOKEN` env var)
+</ParamField>
+
+<ParamField path="--replace" type="boolean">
+  Kill existing server if running on the same port
+</ParamField>
+
+### Server Details
+
+The relay server:
+- Runs on port `19988` (hardcoded)
+- Logs to `~/.playwriter/relay.log`
+- CDP logs to `~/.playwriter/cdp.jsonl`
+- Sets process title to `playwriter-serve`
+
+### Returns
+
+Prints server status to stdout:
+```
+Playwriter CDP relay server started
+  Host: 0.0.0.0
+  Port: 19988
+  Token: (configured)
+  Logs: /Users/you/.playwriter/relay.log
+  CDP Logs: /Users/you/.playwriter/cdp.jsonl
+
+CDP endpoint: http://0.0.0.0:19988?token=<token>
+
+Press Ctrl+C to stop.
+```
+
+### Exit Codes
+
+- `0` - Server stopped cleanly (Ctrl+C)
+- `1` - Error:
+  - Token required for public host
+  - Port already in use (without `--replace`)
+  - Uncaught exception
+  - Unhandled rejection
+
+### Examples
+
+<CodeGroup>
+```bash Local development (default)
+playwriter serve
+```
+
+```bash Docker access
+playwriter serve --host localhost
+
+# Then in Docker container:
+docker run -e PLAYWRITER_HOST=host.docker.internal:19988 your-image
+```
+
+```bash Remote access (LAN/internet)
+playwriter serve --host 0.0.0.0 --token my-secret-token
+
+# Then on remote machine:
+export PLAYWRITER_HOST=192.168.1.100:19988
+export PLAYWRITER_TOKEN=my-secret-token
+playwriter -s 1 -e "await page.goto('https://example.com')"
+```
+
+```bash Replace existing server
+playwriter serve --replace
+```
+
+```bash Environment variable for token
+export PLAYWRITER_TOKEN=my-secret-token
+playwriter serve --host 0.0.0.0
+```
+</CodeGroup>
+
+### Security Notes
+
+- When `--host` is `0.0.0.0` or `::`, a token is **required**
+- The token authenticates all connections via `Authorization: Bearer <token>` header
+- For Docker on the same machine, use `--host localhost` (no token needed)
+- Never expose the relay server publicly without authentication
+
+### Error Messages
+
+#### Missing token for public host
+```
+Error: Authentication token is required when binding to a public host.
+Provide --token <token> or set PLAYWRITER_TOKEN environment variable.
+```
+
+#### Port already in use
+```
+Playwriter server is already running on port 19988
+Tip: Use --replace to kill the existing server and start a new one.
+```
+
+### Signal Handling
+
+The server handles shutdown signals gracefully:
+- `SIGINT` (Ctrl+C) - Closes server and exits
+- `SIGTERM` - Closes server and exits

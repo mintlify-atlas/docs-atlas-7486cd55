@@ -1,0 +1,193 @@
+---
+title: "playwriter session"
+description: "Manage browser sessions for CLI execution"
+---
+
+## playwriter session new
+
+Create a new session and print the session ID. A session is required to execute code with the `-e` flag.
+
+```bash
+playwriter session new
+playwriter session new --browser <stableKey>
+playwriter session new --host example.com
+```
+
+### Options
+
+<ParamField path="--host" type="string">
+  Remote relay server host to connect to (or use `PLAYWRITER_HOST` env var)
+</ParamField>
+
+<ParamField path="--browser" type="string">
+  Stable browser key when multiple browsers are connected. Use this to select which browser to create the session for.
+</ParamField>
+
+### Returns
+
+Prints the session ID to stdout:
+```
+Session 1 created. Use with: playwriter -s 1 -e "..."
+```
+
+### Exit Codes
+
+- `0` - Session created successfully
+- `1` - No connected browsers detected or invalid browser key specified
+
+### Examples
+
+<CodeGroup>
+```bash Create new session
+playwriter session new
+```
+
+```bash Create session for specific browser
+# First list browsers to get stable keys
+playwriter session new  # Will show available browsers if multiple detected
+playwriter session new --browser abc123def456
+```
+
+```bash Remote server
+playwriter session new --host example.com
+```
+</CodeGroup>
+
+---
+
+## playwriter session list
+
+List all active sessions with their metadata.
+
+```bash
+playwriter session list
+playwriter session list --host example.com
+```
+
+### Options
+
+<ParamField path="--host" type="string">
+  Remote relay server host to connect to (or use `PLAYWRITER_HOST` env var)
+</ParamField>
+
+### Returns
+
+Prints a table with session details:
+```
+ID  BROWSER  PROFILE           EXT           STATE KEYS
+--  -------  -------           ---           ----------
+1   Chrome   user@example.com  abc123def456  page, dialog
+2   Chrome   -                 -             -
+```
+
+If no sessions exist:
+```
+No active sessions
+```
+
+### Exit Codes
+
+- `0` - Successfully listed sessions
+- `1` - Error connecting to relay server
+
+### Examples
+
+<CodeGroup>
+```bash List all sessions
+playwriter session list
+```
+
+```bash Remote server
+playwriter session list --host example.com
+```
+</CodeGroup>
+
+---
+
+## playwriter session delete
+
+Delete a session and clear its state.
+
+```bash
+playwriter session delete <sessionId>
+```
+
+### Arguments
+
+<ParamField path="sessionId" type="string" required>
+  The ID of the session to delete
+</ParamField>
+
+### Options
+
+<ParamField path="--host" type="string">
+  Remote relay server host to connect to (or use `PLAYWRITER_HOST` env var)
+</ParamField>
+
+### Returns
+
+```
+Session 1 deleted.
+```
+
+### Exit Codes
+
+- `0` - Session deleted successfully
+- `1` - Session not found or error during deletion
+
+### Examples
+
+<CodeGroup>
+```bash Delete session
+playwriter session delete 1
+```
+
+```bash Remote server
+playwriter session delete 1 --host example.com
+```
+</CodeGroup>
+
+---
+
+## playwriter session reset
+
+Reset the browser connection for a session. This reconnects to the browser and reports available pages.
+
+```bash
+playwriter session reset <sessionId>
+```
+
+### Arguments
+
+<ParamField path="sessionId" type="string" required>
+  The ID of the session to reset
+</ParamField>
+
+### Options
+
+<ParamField path="--host" type="string">
+  Remote relay server host to connect to (or use `PLAYWRITER_HOST` env var)
+</ParamField>
+
+### Returns
+
+```
+Connection reset successfully. 3 page(s) available. Current page URL: https://example.com
+```
+
+### Exit Codes
+
+- `0` - Connection reset successfully
+- `1` - Session not found or error during reset
+
+### Examples
+
+<CodeGroup>
+```bash Reset session
+playwriter session reset 1
+```
+
+```bash Remote server
+playwriter session reset 1 --host example.com
+```
+</CodeGroup>

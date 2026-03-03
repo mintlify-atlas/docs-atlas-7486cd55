@@ -1,0 +1,172 @@
+---
+title: screenshotWithAccessibilityLabels()
+description: Take screenshot with Vimium-style labels overlaid on interactive elements
+---
+
+Take a screenshot with accessibility labels overlaid on interactive elements. Shows Vimium-style labels, captures the screenshot, then removes the labels. The screenshot and accessibility snapshot are automatically included in the response.
+
+## Function Signature
+
+```ts
+async function screenshotWithAccessibilityLabels(options: {
+  page: Page
+  interactiveOnly?: boolean
+}): Promise<void>
+```
+
+## Parameters
+
+### page
+
+**Type:** `Page` (required)
+
+The page to screenshot.
+
+### interactiveOnly
+
+**Type:** `boolean` (optional)
+
+**Default:** `true`
+
+Only show labels for interactive elements (buttons, links, inputs, etc.). When `false`, shows labels for all elements including text nodes.
+
+## Return Value
+
+**Type:** `Promise<void>`
+
+The function doesn't return a value. Instead, it automatically adds the screenshot and accessibility snapshot to the execution result.
+
+## Output
+
+After calling this function, the execution result includes:
+
+1. **Screenshot file** saved to `./tmp/playwriter-screenshot-{timestamp}-{random}.jpg`
+2. **Base64 image data** automatically included in the response
+3. **Accessibility snapshot** showing all labeled elements with their locators
+4. **Label count** showing how many elements were labeled
+
+Example output:
+
+```
+Screenshot saved to: ./tmp/playwriter-screenshot-1234567890-abcd.jpg
+Labels shown: 42
+
+Accessibility snapshot:
+- banner:
+  - link "Home" [id="nav-home"]
+  - navigation:
+    - link "Docs" [data-testid="docs-link"]
+    - button "Search" role=button[name="Search"]
+- main:
+  - heading "Welcome"
+  - button "Get Started" [id="cta-btn"]
+```
+
+## Label Appearance
+
+Labels are color-coded by element type:
+
+- **Yellow** — Links
+- **Orange** — Buttons
+- **Coral** — Text inputs
+- **Pink** — Checkboxes
+- **Peach** — Sliders
+- **Salmon** — Menus
+- **Amber** — Tabs
+
+Each label shows the ref (e.g., `e1`, `e2`, or stable IDs like `submit-btn`).
+
+## Examples
+
+### Basic usage
+
+```js
+// Take labeled screenshot
+await screenshotWithAccessibilityLabels({ page: state.page })
+
+// Use refs from snapshot to interact
+await state.page.locator('[id="submit-btn"]').click()
+```
+
+### Multiple screenshots
+
+```js
+// You can take multiple screenshots in one execution
+await screenshotWithAccessibilityLabels({ page: state.page })
+await state.page.click('button')
+await screenshotWithAccessibilityLabels({ page: state.page })
+// Both images are included in the response
+```
+
+### With all elements
+
+```js
+// Show labels for all elements (not just interactive)
+await screenshotWithAccessibilityLabels({ 
+  page: state.page, 
+  interactiveOnly: false 
+})
+```
+
+## When to Use
+
+Use `screenshotWithAccessibilityLabels` when:
+
+- Page has complex visual layout (grids, galleries, dashboards, maps)
+- Spatial position matters (e.g., "first image", "top-left button")
+- DOM order doesn't match visual order
+- You need to understand the visual hierarchy
+
+**Don't use screenshots when:**
+
+- You just need text content → use `snapshot({ search: /pattern/ })` instead
+- Checking if an element exists → use `snapshot()` instead
+- Reading console logs → use `getLatestLogs()` instead
+- Verifying text appeared → use `snapshot()` instead
+
+Screenshots + image analysis is expensive and slow. Only use when you need visual/spatial information.
+
+## Timeout
+
+Use a timeout of **20 seconds** for complex pages:
+
+```bash
+playwriter -s 1 -e 'await screenshotWithAccessibilityLabels({ page: state.page })' --timeout 20000
+```
+
+## Combining with snapshot()
+
+Prefer this workflow:
+
+1. Use `screenshotWithAccessibilityLabels` first to understand layout and identify target elements visually
+2. Then use `snapshot({ search: /pattern/ })` for efficient searching in subsequent calls
+
+```js
+// First: visual overview
+await screenshotWithAccessibilityLabels({ page: state.page })
+
+// Then: efficient text search
+const buttons = await snapshot({ page: state.page, search: /submit|save/i })
+console.log(buttons)
+```
+
+## Using refs from screenshot
+
+The snapshot shows refs like `e1`, `e2`, etc. Use `refToLocator()` to convert them to selectors:
+
+```js
+// Take screenshot
+await screenshotWithAccessibilityLabels({ page: state.page })
+
+// Get selector for ref from screenshot
+const locator = refToLocator({ ref: 'e3' })
+await state.page.locator(locator).click()
+```
+
+## Notes
+
+- Labels auto-hide after screenshot is taken
+- Labels are repositioned if page layout changes
+- Use `scale: 'css'` for regular screenshots to avoid 2-4x larger images on high-DPI displays
+- Screenshot is automatically resized to optimal dimensions for Claude vision (1568px max)
+- If sharp is not installed, screenshots are clipped to 1568px instead of resized

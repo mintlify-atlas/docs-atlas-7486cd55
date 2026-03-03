@@ -1,0 +1,272 @@
+---
+title: 'Editor'
+description: 'Live-edit JavaScript and CSS in the browser'
+---
+
+The Editor class lets you read, search, and modify running JavaScript and CSS files using Chrome DevTools Protocol.
+
+<Note>
+  Edits are in-memory only - they modify the running V8 instance but are not saved to disk. Changes persist until page reload.
+</Note>
+
+## Creating an Editor
+
+```typescript
+import { getCDPSessionForPage, Editor } from 'playwriter'
+import type { ICDPSession } from 'playwriter'
+
+const cdp: ICDPSession = await getCDPSessionForPage({ page })
+const editor = new Editor({ cdp })
+
+// Enable the editor (must be called first)
+await editor.enable()
+```
+
+**Constructor:**
+
+<ParamField path="cdp" type="ICDPSession" required>
+  CDP session instance from `getCDPSessionForPage`
+</ParamField>
+
+## Methods
+
+### enable
+
+Enables the editor. Must be called before other methods. Automatically called by list/read/edit/grep if not already enabled.
+
+```typescript
+await editor.enable()
+```
+
+<Tip>
+  Reload the page after enabling to capture all scripts that load during page initialization.
+</Tip>
+
+### list
+
+Lists available scripts and stylesheets. Returns URLs that can be used with `read()` and `edit()`.
+
+```typescript
+// List all scripts and stylesheets
+const urls: string[] = await editor.list()
+
+// Filter by regex
+const jsFiles = await editor.list({ pattern: /\.js$/ })
+const cssFiles = await editor.list({ pattern: /\.css$/ })
+const appScripts = await editor.list({ pattern: /app/ })
+```
+
+**Parameters:**
+
+<ParamField path="pattern" type="RegExp">
+  Optional regex to filter URLs
+</ParamField>
+
+**Returns:** `Promise<string[]>` - Array of script/stylesheet URLs
+
+Inline scripts use `inline://{scriptId}` URLs.
+
+### read
+
+Reads a script or stylesheet's source code with line numbers.
+
+```typescript
+import type { ReadResult } from 'playwriter'
+
+const result: ReadResult = await editor.read({
+  url: 'https://example.com/app.js'
+})
+
+console.log(result.content)     // Line-numbered source
+console.log(result.totalLines)  // Total line count
+console.log(result.startLine)   // First line number (1-based)
+console.log(result.endLine)     // Last line number
+```
+
+**Parameters:**
+
+<ParamField path="url" type="string" required>
+  Script or stylesheet URL from `list()`. Use `inline://{id}` for inline scripts.
+</ParamField>
+
+<ParamField path="offset" type="number" default="0">
+  Line number to start from (0-based)
+</ParamField>
+
+<ParamField path="limit" type="number" default="2000">
+  Number of lines to return
+</ParamField>
+
+**Returns:** `Promise<ReadResult>`
+
+```typescript
+export interface ReadResult {
+  content: string      // Line-numbered source code
+  totalLines: number   // Total lines in file
+  startLine: number    // First line in result (1-based)
+  endLine: number      // Last line in result
+}
+```
+
+**Example output:**
+
+```
+    1| import { foo } from './utils'
+    2| 
+    3| export function bar() {
+    4|   return foo()
+    5| }
+```
+
+### edit
+
+Edits a script or stylesheet by replacing `oldString` with `newString`. Uses exact string matching.
+
+```typescript
+import type { EditResult } from 'playwriter'
+
+const result: EditResult = await editor.edit({
+  url: 'https://example.com/app.js',
+  oldString: 'const DEBUG = false',
+  newString: 'const DEBUG = true'
+})
+
+console.log(result.success)      // true if edit succeeded
+console.log(result.stackChanged) // true if call stack was modified
+```
+
+**Parameters:**
+
+<ParamField path="url" type="string" required>
+  Script or stylesheet URL from `list()`
+</ParamField>
+
+<ParamField path="oldString" type="string" required>
+  Exact string to find and replace (must appear exactly once)
+</ParamField>
+
+<ParamField path="newString" type="string" required>
+  Replacement string
+</ParamField>
+
+<ParamField path="dryRun" type="boolean" default="false">
+  If true, validates without applying the edit
+</ParamField>
+
+**Returns:** `Promise<EditResult>`
+
+```typescript
+export interface EditResult {
+  success: boolean
+  stackChanged?: boolean  // true if active call stack was modified
+}
+```
+
+**Errors:**
+- Throws if `oldString` not found
+- Throws if `oldString` appears more than once (provide more context to make it unique)
+
+### grep
+
+Searches for a regex pattern across all scripts and stylesheets.
+
+```typescript
+import type { SearchMatch } from 'playwriter'
+
+const matches: SearchMatch[] = await editor.grep({
+  regex: /console\.(log|error|warn)/
+})
+
+matches.forEach(match => {
+  console.log(`${match.url}:${match.lineNumber}`)
+  console.log(`  ${match.lineContent}`)
+})
+```
+
+**Parameters:**
+
+<ParamField path="regex" type="RegExp" required>
+  Regular expression to search for in file contents
+</ParamField>
+
+<ParamField path="pattern" type="RegExp">
+  Optional regex to filter which URLs to search
+</ParamField>
+
+**Returns:** `Promise<SearchMatch[]>`
+
+```typescript
+export interface SearchMatch {
+  url: string          // Script/stylesheet URL
+  lineNumber: number   // Line number where match found (1-based)
+  lineContent: string  // Matched line content (truncated to 200 chars)
+}
+```
+
+### write
+
+Replaces entire script or stylesheet content. Use with caution - prefer `edit()` for targeted changes.
+
+```typescript
+const result = await editor.write({
+  url: 'https://example.com/app.js',
+  content: 'console.log("new content")'
+})
+```
+
+**Parameters:**
+
+<ParamField path="url" type="string" required>
+  Script or stylesheet URL
+</ParamField>
+
+<ParamField path="content" type="string" required>
+  New content to replace entire file
+</ParamField>
+
+<ParamField path="dryRun" type="boolean" default="false">
+  If true, validates without applying (JS only)
+</ParamField>
+
+**Returns:** `Promise<EditResult>`
+
+## Complete Example
+
+```typescript
+import { chromium } from 'playwright-core'
+import { startPlayWriterCDPRelayServer, getCdpUrl, getCDPSessionForPage, Editor } from 'playwriter'
+
+const server = await startPlayWriterCDPRelayServer()
+const browser = await chromium.connectOverCDP(getCdpUrl())
+const page = browser.contexts()[0].pages()[0]
+
+await page.goto('https://example.com')
+
+const cdp = await getCDPSessionForPage({ page })
+const editor = new Editor({ cdp })
+
+// List all scripts
+const scripts = await editor.list({ pattern: /\.js$/ })
+console.log('Scripts:', scripts)
+
+// Read a script
+const { content } = await editor.read({ url: scripts[0] })
+console.log(content)
+
+// Search for console statements
+const matches = await editor.grep({ regex: /console\./ })
+console.log('Console statements:', matches.length)
+
+// Edit a script
+await editor.edit({
+  url: scripts[0],
+  oldString: 'const DEBUG = false',
+  newString: 'const DEBUG = true'
+})
+
+server.close()
+```
+
+## Chrome 142+ Note
+
+Chrome 142+ (Feb 2026) deprecated `Debugger.setScriptSource`. The Editor automatically falls back to `Runtime.evaluate` to re-execute modified scripts. This works for scripts that define global functions but may have different behavior than the deprecated CDP command.

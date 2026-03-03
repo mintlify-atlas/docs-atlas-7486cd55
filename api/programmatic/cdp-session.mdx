@@ -1,0 +1,181 @@
+---
+title: 'CDP Session'
+description: 'Get a CDP session for raw Chrome DevTools Protocol access'
+---
+
+Access Chrome DevTools Protocol directly for advanced browser control beyond Playwright's API.
+
+## Getting a CDP Session
+
+### getCDPSessionForPage
+
+Returns a CDP session for a page by reusing Playwright's internal WebSocket connection.
+
+```typescript
+import { getCDPSessionForPage } from 'playwriter'
+import type { ICDPSession } from 'playwriter'
+
+const cdp: ICDPSession = await getCDPSessionForPage({ page })
+
+// Send CDP commands
+const metrics = await cdp.send('Performance.getMetrics')
+
+// Listen to CDP events
+cdp.on('Network.requestWillBeSent', (params) => {
+  console.log('Request:', params.request.url)
+})
+```
+
+**Parameters:**
+
+<ParamField path="page" type="Page" required>
+  Playwright Page instance
+</ParamField>
+
+**Returns:** `Promise<PlaywrightCDPSessionAdapter>`
+
+<Note>
+  This function reuses Playwright's internal CDP session instead of creating a new one, which is required for the relay server.
+</Note>
+
+## ICDPSession Interface
+
+Type-safe CDP session interface with full autocomplete support.
+
+```typescript
+export interface ICDPSession {
+  send<K extends keyof ProtocolMapping.Commands>(
+    method: K,
+    params?: ProtocolMapping.Commands[K]['paramsType'][0],
+    sessionId?: string | null,
+  ): Promise<ProtocolMapping.Commands[K]['returnType']>
+
+  on<K extends keyof ProtocolMapping.Events>(
+    event: K,
+    callback: (params: ProtocolMapping.Events[K][0]) => void,
+  ): unknown
+
+  off<K extends keyof ProtocolMapping.Events>(
+    event: K,
+    callback: (params: ProtocolMapping.Events[K][0]) => void,
+  ): unknown
+
+  detach(): Promise<void>
+  getSessionId?(): string | null
+}
+```
+
+Return types are automatically inferred from the command string. For example:
+
+- `cdp.send('Page.getLayoutMetrics')` returns `Promise<Protocol.Page.GetLayoutMetricsResponse>`
+- `cdp.send('Runtime.evaluate', { expression: '1+1' })` returns `Promise<Protocol.Runtime.EvaluateResponse>`
+
+## PlaywrightCDPSessionAdapter
+
+Wraps Playwright's CDPSession to implement the ICDPSession interface.
+
+```typescript
+import { PlaywrightCDPSessionAdapter } from 'playwriter'
+import type { CDPSession as PlaywrightCDPSession } from '@xmorse/playwright-core'
+
+const context = page.context()
+const playwrightSession: PlaywrightCDPSession = await context.getExistingCDPSession(page)
+const cdp = new PlaywrightCDPSessionAdapter(playwrightSession)
+
+// Now use the type-safe interface
+await cdp.send('Page.setDeviceMetricsOverride', {
+  width: 375,
+  height: 812,
+  deviceScaleFactor: 3,
+  mobile: true,
+})
+```
+
+## CDP Commands Examples
+
+### Performance Metrics
+
+```typescript
+const cdp = await getCDPSessionForPage({ page })
+
+const metrics = await cdp.send('Performance.getMetrics')
+console.log(metrics.metrics.find(m => m.name === 'JSHeapUsedSize'))
+```
+
+### Network Monitoring
+
+```typescript
+const cdp = await getCDPSessionForPage({ page })
+
+await cdp.send('Network.enable')
+
+cdp.on('Network.requestWillBeSent', (params) => {
+  console.log('Request:', params.request.url)
+})
+
+cdp.on('Network.responseReceived', (params) => {
+  console.log('Response:', params.response.status, params.response.url)
+})
+```
+
+### Console Messages
+
+```typescript
+const cdp = await getCDPSessionForPage({ page })
+
+await cdp.send('Runtime.enable')
+
+cdp.on('Runtime.consoleAPICalled', (params) => {
+  console.log('Console:', params.type, params.args)
+})
+```
+
+### JavaScript Coverage
+
+```typescript
+const cdp = await getCDPSessionForPage({ page })
+
+// Start coverage
+await cdp.send('Profiler.enable')
+await cdp.send('Profiler.startPreciseCoverage', {
+  callCount: true,
+  detailed: true,
+})
+
+// Navigate and interact with page
+await page.goto('https://example.com')
+
+// Get coverage data
+const coverage = await cdp.send('Profiler.takePreciseCoverage')
+console.log('Functions executed:', coverage.result.length)
+```
+
+### Emulation
+
+```typescript
+const cdp = await getCDPSessionForPage({ page })
+
+// Emulate timezone
+await cdp.send('Emulation.setTimezoneOverride', {
+  timezoneId: 'America/New_York',
+})
+
+// Emulate geolocation
+await cdp.send('Emulation.setGeolocationOverride', {
+  latitude: 40.7128,
+  longitude: -74.0060,
+  accuracy: 100,
+})
+```
+
+## Detaching
+
+Detach the CDP session when done:
+
+```typescript
+await cdp.detach()
+```
+
+<Warning>
+  Detaching closes the CDP connection. Don't detach if you're using Playwright's built-in CDP session.
+</Warning>

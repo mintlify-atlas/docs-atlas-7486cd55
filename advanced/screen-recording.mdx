@@ -1,0 +1,233 @@
+---
+title: Screen Recording
+description: Record browser sessions at native FPS with playwriter's efficient tab capture API
+---
+
+## Overview
+
+Playwriter provides built-in screen recording using Chrome's `chrome.tabCapture` API. Unlike traditional screen recording, this approach:
+
+- **100x more efficient** than desktop screen capture (CPU usage: ~2% vs ~200%)
+- **Survives page navigation** - recording continues across page reloads and navigation
+- **Native frame rate** - captures at 30-60 FPS
+- **Includes ghost cursor** - automatically overlays smooth cursor animations during interactions
+
+## Quick Start
+
+```js
+// Start recording
+await recording.start({
+  page: state.page,
+  outputPath: './demo.mp4',
+  frameRate: 30,
+  audio: false,
+})
+
+// Perform actions - recording continues through navigation
+await state.page.click('a[href="/products"]')
+await state.page.waitForLoadState('domcontentloaded')
+await state.page.goBack()
+
+// Stop and save
+const { path, duration, size } = await recording.stop({ page: state.page })
+console.log(`Saved ${size} bytes, duration: ${duration}ms`)
+```
+
+## API Reference
+
+### recording.start()
+
+Starts recording the page as mp4 video.
+
+**Parameters:**
+
+- `page` - Page to record
+- `outputPath` - Path to save the video file (required)
+- `frameRate` - Frame rate in FPS (default: 30)
+- `videoBitsPerSecond` - Video bitrate in bps (default: 2500000 = 2.5 Mbps)
+- `audioBitsPerSecond` - Audio bitrate in bps (default: 128000 = 128 kbps)
+- `audio` - Include tab audio (default: false)
+
+**Returns:** `{ isRecording: boolean, startedAt: number, tabId: number }`
+
+```js
+await recording.start({
+  page: state.page,
+  outputPath: './recording.mp4',
+  frameRate: 60, // Higher frame rate for smooth motion
+  audio: true, // Capture tab audio
+  videoBitsPerSecond: 5000000, // Higher quality
+})
+```
+
+### recording.stop()
+
+Stops recording and saves the video file.
+
+**Parameters:**
+
+- `page` - Page being recorded
+
+**Returns:** `{ path: string, duration: number, size: number, executionTimestamps: Array }`
+
+```js
+const result = await recording.stop({ page: state.page })
+console.log('Video saved to:', result.path)
+console.log('Duration:', result.duration, 'ms')
+console.log('File size:', result.size, 'bytes')
+```
+
+### recording.isRecording()
+
+Checks if recording is currently active.
+
+**Parameters:**
+
+- `page` - Page to check
+
+**Returns:** `{ isRecording: boolean, startedAt?: number, tabId?: number }`
+
+```js
+const { isRecording, startedAt } = await recording.isRecording({ page: state.page })
+if (isRecording) {
+  console.log('Recording started at:', new Date(startedAt))
+}
+```
+
+### recording.cancel()
+
+Cancels recording without saving the file.
+
+**Parameters:**
+
+- `page` - Page being recorded
+
+```js
+await recording.cancel({ page: state.page })
+```
+
+## Ghost Cursor
+
+While recording is active, Playwriter automatically overlays a smooth ghost cursor that follows automated mouse actions:
+
+- `page.mouse.move()`, `page.mouse.click()`
+- `locator.click()`, `page.click()`
+- Hover interactions
+
+For demos where cursor movement should be visible and human-like, drive the page with interaction methods. Avoid skipping interactions with direct state jumps (e.g., `goto(itemUrl)` instead of clicking the link) when your goal is to show realistic pointer motion in the recording.
+
+### Manual Ghost Cursor Control
+
+You can show/hide the ghost cursor manually even when not recording:
+
+```js
+// Show cursor (minimal triangular pointer)
+await ghostCursor.show({ page: state.page })
+
+// Different cursor styles
+await ghostCursor.show({ page: state.page, style: 'minimal' })
+await ghostCursor.show({ page: state.page, style: 'dot' })
+await ghostCursor.show({ page: state.page, style: 'screenstudio' })
+
+// Hide cursor
+await ghostCursor.hide({ page: state.page })
+```
+
+## Creating Demo Videos
+
+Use `createDemoVideo()` to automatically speed up idle sections (time between execute() calls) while keeping interactions at normal speed:
+
+```js
+// Start recording
+await recording.start({ page: state.page, outputPath: './recording.mp4' })
+```
+
+```js
+// ... multiple execute() calls with browser interactions ...
+// Each call's timing is tracked automatically
+```
+
+```js
+// Stop recording and create demo video
+const recordingResult = await recording.stop({ page: state.page })
+
+const demoPath = await createDemoVideo({
+  recordingPath: recordingResult.path,
+  durationMs: recordingResult.duration,
+  executionTimestamps: recordingResult.executionTimestamps,
+  speed: 5, // Speed up idle gaps 5x (default)
+  outputFile: './demo.mp4', // Optional custom output path
+})
+console.log('Demo video:', demoPath)
+```
+
+**Requirements:**
+- Requires `ffmpeg` and `ffprobe` installed on the system
+- Use `--timeout 120000` (or higher) when calling createDemoVideo - ffmpeg processing can take 60-120+ seconds
+- A 1-second buffer is preserved around each interaction for context
+
+## Permission Requirements
+
+**Important:** Recording requires the user to have clicked the Playwriter extension icon on the tab. This grants `activeTab` permission needed for `chrome.tabCapture`.
+
+If you need to record a new tab, ask the user to click the extension icon on it first.
+
+For automated recording without manual clicks, Chrome can be restarted with special flags:
+
+```bash
+# macOS
+open -a "Google Chrome" --args --profile-directory=Default \
+  --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe \
+  --auto-accept-this-tab-capture
+
+# Linux
+google-chrome --profile-directory=Default \
+  --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe \
+  --auto-accept-this-tab-capture &
+
+# Windows
+start chrome.exe --profile-directory=Default \
+  --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe \
+  --auto-accept-this-tab-capture
+```
+
+**WARNING:** These commands will close all Chrome windows. Save your work first!
+
+## How It Works
+
+### Extension-Based Recording
+
+Recording uses `chrome.tabCapture` which runs in the extension context, not the page. The extension holds the `MediaRecorder`, so:
+
+- Recording persists across page navigations
+- Page reloads don't interrupt capture
+- The recording survives even if the page crashes
+
+This is fundamentally different from `getDisplayMedia()` where the page context holds the recorder.
+
+### Efficiency Comparison
+
+**Desktop screen capture:**
+- CPU: ~200% (encoding entire screen)
+- FPS: Limited to 15-30
+- File size: Large (captures everything)
+
+**Tab capture with Playwriter:**
+- CPU: ~2% (encodes only tab content)
+- FPS: Native 30-60
+- File size: Optimized (captures only active tab)
+
+**100x more efficient** means you can record long sessions without thermal throttling or battery drain.
+
+## Backward Compatibility
+
+These functions remain available as aliases:
+
+```js
+await startRecording({ page: state.page, outputPath: './video.mp4' })
+await stopRecording({ page: state.page })
+await isRecording({ page: state.page })
+await cancelRecording({ page: state.page })
+```
+
+New code should use the `recording.*` namespace for consistency.

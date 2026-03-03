@@ -1,0 +1,185 @@
+---
+title: MCP Server Setup
+description: Install and configure the Playwriter MCP server in Claude Desktop, Cursor, VS Code, and other MCP clients
+---
+
+<Info>
+CLI is the recommended way to use Playwriter. See [CLI Usage](/cli/session-management) for details.
+</Info>
+
+The Playwriter MCP server lets AI assistants control your Chrome browser through the Model Context Protocol.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install the Chrome extension">
+    Install [Playwriter from the Chrome Web Store](https://chromewebstore.google.com/detail/playwriter/jfeammnjpkecdekppnclgkkffahnhfhe)
+  </Step>
+  
+  <Step title="Enable on a tab">
+    Click the extension icon on any tab → icon turns green when connected
+  </Step>
+</Steps>
+
+## Basic Configuration
+
+Add Playwriter to your MCP client settings:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"]
+    }
+  }
+}
+```
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%/Claude/claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"]
+    }
+  }
+}
+```
+
+### Cursor
+
+Edit `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"]
+    }
+  }
+}
+```
+
+### VS Code with Continue
+
+Edit `.continue/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"]
+    }
+  }
+}
+```
+
+## Auto-Install Script
+
+Use the installer to automatically configure your MCP client:
+
+```bash
+npx -y @playwriter/install-mcp playwriter@latest
+```
+
+This detects your MCP client (Claude Desktop, Cursor, etc.) and updates the config file automatically.
+
+## Using the MCP Server
+
+<Steps>
+  <Step title="Enable extension on a tab">
+    Click the Playwriter extension icon on at least one Chrome tab (icon turns green)
+  </Step>
+  
+  <Step title="MCP auto-connects">
+    The MCP server automatically starts the relay server and connects to enabled tabs
+  </Step>
+  
+  <Step title="Use the execute tool">
+    Ask your AI assistant to control the browser. The MCP exposes:
+    - `execute` - Run Playwright code snippets
+    - `reset` - Reconnect if connection issues occur
+  </Step>
+</Steps>
+
+## Available Tools
+
+### execute
+
+Run Playwright code with access to `page`, `context`, and `state` variables.
+
+**Parameters:**
+- `code` (string, required) - JavaScript code to execute
+- `timeout` (number, optional) - Timeout in milliseconds (default: 10000)
+
+**Example:**
+```javascript
+await page.goto('https://example.com')
+```
+
+### reset
+
+Recreate the CDP connection and reset browser/page/context. Use when:
+- Connection errors occur
+- Page is closed
+- Internal Playwright errors
+- No pages available in context
+
+This clears custom properties and the `state` object, keeping only `page`, `context`, `state` (empty), and utility functions.
+
+## Verifying Installation
+
+After configuring the MCP server:
+
+1. Restart your MCP client (Claude Desktop, Cursor, etc.)
+2. Check that the extension icon is green on at least one tab
+3. Ask the AI to navigate to a website:
+   ```
+   Navigate to example.com and tell me the page title
+   ```
+
+## Troubleshooting
+
+### MCP server not responding
+
+1. Check the relay server logs:
+   ```bash
+   playwriter logfile
+   # typically: ~/.playwriter/relay-server.log
+   ```
+
+2. Verify the extension is enabled (green icon) on at least one tab
+
+3. Use the `reset` tool to recreate the connection
+
+### Extension not connecting
+
+1. Click the extension icon on a tab (should turn green)
+2. Reload the extension from `chrome://extensions`
+3. Restart Chrome if issues persist
+
+### Chrome shows all pages as about:blank
+
+This is a known Chrome bug in the `chrome.debugger` API. Restart Chrome to fix.
+
+<Warning>
+If the browser switches to light mode when connecting, this is a [known Playwright issue](https://github.com/microsoft/playwright/issues/37627).
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/mcp/configuration">
+    Set up environment variables and remote access
+  </Card>
+  <Card title="Remote Access" icon="cloud" href="/mcp/remote-access">
+    Control Chrome on remote machines over the internet
+  </Card>
+</CardGroup>

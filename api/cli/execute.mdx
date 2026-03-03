@@ -1,0 +1,111 @@
+---
+title: "playwriter -e"
+description: "Execute JavaScript code in the browser and exit"
+---
+
+## playwriter -e
+
+Execute JavaScript code in the browser via the relay server and exit. Requires a session ID from `playwriter session new`.
+
+```bash
+playwriter -s <sessionId> -e <code>
+playwriter --session <sessionId> --eval <code>
+```
+
+### Options
+
+<ParamField path="-s, --session" type="string" required>
+  Session ID (get one with `playwriter session new`). Can also be set via `PLAYWRITER_SESSION` environment variable.
+</ParamField>
+
+<ParamField path="-e, --eval" type="string" required>
+  JavaScript code to execute. Read https://playwriter.dev/SKILL.md for usage.
+</ParamField>
+
+<ParamField path="--timeout" type="number" default="10000">
+  Execution timeout in milliseconds
+</ParamField>
+
+<ParamField path="--host" type="string">
+  Remote relay server host to connect to (or use `PLAYWRITER_HOST` env var). If not specified, defaults to `127.0.0.1`.
+</ParamField>
+
+<ParamField path="--token" type="string">
+  Authentication token (or use `PLAYWRITER_TOKEN` env var)
+</ParamField>
+
+### Returns
+
+Prints execution result to stdout:
+- Text output from the code
+- Screenshot count if images were captured
+- Errors to stderr if execution failed
+
+### Exit Codes
+
+- `0` - Code executed successfully
+- `1` - Error during execution:
+  - Missing session ID
+  - Cannot connect to relay server
+  - Code execution error
+  - Authentication failed
+  - Timeout exceeded
+
+### Examples
+
+<CodeGroup>
+```bash Navigate to URL
+playwriter -s 1 -e "await page.goto('https://example.com')"
+```
+
+```bash Click element
+playwriter -s 1 -e "await page.click('button')"
+```
+
+```bash Get page content
+playwriter -s 1 -e "console.log(await snapshot({ page }))"
+```
+
+```bash Custom timeout
+playwriter -s 1 -e "await page.waitForSelector('.slow-element', { timeout: 30000 })" --timeout 35000
+```
+
+```bash Remote server with auth
+playwriter -s 1 -e "await page.goto('https://example.com')" --host example.com --token your-token
+```
+
+```bash Environment variables
+export PLAYWRITER_SESSION=1
+export PLAYWRITER_HOST=example.com
+export PLAYWRITER_TOKEN=your-token
+playwriter -e "await page.goto('https://example.com')"
+```
+</CodeGroup>
+
+### Error Messages
+
+#### Missing session
+```
+Error: -s/--session is required.
+Always run `playwriter session new` first to get a session ID to use.
+```
+
+#### Connection refused
+```
+Error: Cannot connect to relay server.
+The Playwriter relay server should start automatically. Check logs at:
+  ~/.playwriter/relay.log
+```
+
+#### HTTP errors
+```
+Error: 401 Unauthorized
+Error: 404 Session not found
+```
+
+### Notes
+
+- The relay server starts automatically for local execution (when `--host` is not specified)
+- If the extension is not connected, you'll see a warning but execution will attempt to continue
+- Screenshots are captured as base64-encoded images in the response
+- The current working directory is passed to the execution context

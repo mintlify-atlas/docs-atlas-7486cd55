@@ -1,0 +1,181 @@
+---
+title: Session Management
+description: Create, list, reset, and delete Playwriter sessions
+---
+
+Playwriter sessions provide **isolated sandboxes** with their own `state` object. Use sessions to:
+
+- Keep state separate between different tasks or agents
+- Persist data (pages, variables, listeners) across multiple execute calls
+- Avoid interference when multiple agents use Playwriter simultaneously
+
+## Create a new session
+
+Get a new session ID to use in commands:
+
+```bash
+playwriter session new
+```
+
+**Example output:**
+
+```
+Session 1 created. Use with: playwriter -s 1 -e "..."
+```
+
+### Multiple browsers
+
+If you have multiple browsers connected, you'll see a table:
+
+```
+Multiple browsers detected:
+
+KEY                      BROWSER  PROFILE
+-----------------------  -------  -------
+abc123def456             Chrome   user@example.com
+xyz789ghi012             Chrome   work@company.com
+
+Run again with --browser <stableKey>.
+```
+
+Create a session for a specific browser:
+
+```bash
+playwriter session new --browser abc123def456
+```
+
+<ParamField path="--host" type="string">
+  Remote relay server host (overrides PLAYWRITER_HOST)
+</ParamField>
+
+<ParamField path="--browser" type="string">
+  Stable browser key when multiple browsers are connected
+</ParamField>
+
+## List active sessions
+
+View all sessions with their state keys:
+
+```bash
+playwriter session list
+```
+
+**Example output:**
+
+```
+ID  BROWSER  PROFILE           EXT  STATE KEYS
+--  -------  -------           ---  ----------
+1   Chrome   user@example.com  -    myPage, userData
+2   Chrome   user@example.com  -    -
+```
+
+The `STATE KEYS` column shows which keys are stored in each session's `state` object.
+
+<ParamField path="--host" type="string">
+  Remote relay server host (overrides PLAYWRITER_HOST)
+</ParamField>
+
+## Reset a session
+
+Reset the browser connection if it becomes stale or broken:
+
+```bash
+playwriter session reset 1
+```
+
+**Example output:**
+
+```
+Connection reset successfully. 3 page(s) available. Current page URL: https://example.com
+```
+
+This command:
+- Reconnects to the browser
+- Preserves the session's `state` object
+- Reports available pages and current page URL
+
+<ParamField path="sessionId" type="string" required>
+  The session ID to reset
+</ParamField>
+
+<ParamField path="--host" type="string">
+  Remote relay server host (overrides PLAYWRITER_HOST)
+</ParamField>
+
+## Delete a session
+
+Delete a session and clear its state:
+
+```bash
+playwriter session delete 1
+```
+
+**Example output:**
+
+```
+Session 1 deleted.
+```
+
+<Warning>
+  This permanently deletes the session and all data stored in its `state` object. The browser pages remain open.
+</Warning>
+
+<ParamField path="sessionId" type="string" required>
+  The session ID to delete
+</ParamField>
+
+<ParamField path="--host" type="string">
+  Remote relay server host (overrides PLAYWRITER_HOST)
+</ParamField>
+
+## How sessions work
+
+**State is isolated, pages are shared:**
+
+- Each session has its own `state` object that persists across execute calls
+- Browser tabs (pages) are shared across all sessions
+- Multiple agents can work simultaneously without interference by using different sessions
+
+**Example workflow:**
+
+```bash
+# Session 1: Store a page
+playwriter session new  # outputs: 1
+playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://example.com")'
+playwriter -s 1 -e 'state.data = await state.page.title()'
+
+# Session 2: Independent state
+playwriter session new  # outputs: 2
+playwriter -s 2 -e 'console.log(state.data)'  # undefined - different session
+
+# Session 1: State persists
+playwriter -s 1 -e 'console.log(state.data)'  # prints the title saved earlier
+```
+
+## Environment variables
+
+<ParamField path="PLAYWRITER_HOST" type="string">
+  Default relay server host (can be overridden with `--host`)
+</ParamField>
+
+<ParamField path="PLAYWRITER_TOKEN" type="string">
+  Authentication token for remote relay servers
+</ParamField>
+
+## Troubleshooting
+
+**"No connected browsers detected"**
+
+Click the Playwriter extension icon on any tab to enable it. The icon turns green when connected.
+
+**Session state not persisting**
+
+Make sure you're using the same session ID (`-s`) for all related commands.
+
+**Connection issues**
+
+Try resetting the session:
+
+```bash
+playwriter session reset <sessionId>
+```

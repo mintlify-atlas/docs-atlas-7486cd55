@@ -1,0 +1,129 @@
+---
+title: "playwriter logfile"
+description: "Print paths to relay server log files"
+---
+
+## playwriter logfile
+
+Print the paths to the relay server log files. Useful for debugging connection issues and inspecting CDP traffic.
+
+```bash
+playwriter logfile
+```
+
+### Returns
+
+Prints two log file paths to stdout:
+```
+relay: /Users/you/.playwriter/relay.log
+cdp: /Users/you/.playwriter/cdp.jsonl
+```
+
+### Log Files
+
+<ParamField path="relay.log" type="file">
+  Main relay server log file containing:
+  - Server startup/shutdown events
+  - Extension connection status
+  - Error messages and warnings
+  - Session lifecycle events
+</ParamField>
+
+<ParamField path="cdp.jsonl" type="file">
+  Chrome DevTools Protocol event log in JSONL format (one JSON object per line):
+  - All CDP commands sent between extension, CLI, MCP, and relay
+  - CDP events from the browser
+  - Request/response pairs
+  - Direction indicators (client→server, server→client)
+</ParamField>
+
+### Exit Codes
+
+- `0` - Always succeeds
+
+### Examples
+
+<CodeGroup>
+```bash View log paths
+playwriter logfile
+```
+
+```bash Open relay log
+cat $(playwriter logfile | grep relay | cut -d' ' -f2)
+```
+
+```bash Tail CDP events
+tail -f $(playwriter logfile | grep cdp | cut -d' ' -f2)
+```
+
+```bash Search CDP log with jq
+playwriter logfile  # Get paths first
+jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
+```
+
+```bash Filter CDP commands
+jq 'select(.message.method == "Page.navigate")' ~/.playwriter/cdp.jsonl
+```
+
+```bash Count CDP events by type
+jq -r '.message.method // "response"' ~/.playwriter/cdp.jsonl | sort | uniq -c | sort -rn
+```
+</CodeGroup>
+
+### CDP Log Format
+
+Each line in `cdp.jsonl` is a JSON object with this structure:
+
+```json
+{
+  "timestamp": "2024-03-02T10:30:45.123Z",
+  "direction": "client->server",
+  "message": {
+    "id": 1,
+    "method": "Page.navigate",
+    "params": {
+      "url": "https://example.com"
+    }
+  }
+}
+```
+
+<ParamField path="timestamp" type="string">
+  ISO 8601 timestamp of the event
+</ParamField>
+
+<ParamField path="direction" type="string">
+  Message flow direction:
+  - `client->server` - Command from MCP/CLI to extension
+  - `server->client` - Response or event from extension
+</ParamField>
+
+<ParamField path="message" type="object">
+  The CDP message object containing `id`, `method`, and `params`
+</ParamField>
+
+### Common Use Cases
+
+#### Debug connection issues
+```bash
+# Check if extension is connected
+grep "connected" $(playwriter logfile | grep relay | cut -d' ' -f2)
+```
+
+#### Analyze CDP traffic
+```bash
+# See all CDP methods used
+jq -r '.message.method // "response"' ~/.playwriter/cdp.jsonl | sort | uniq
+```
+
+#### Find failed commands
+```bash
+# Search for errors in CDP responses
+jq 'select(.message.error)' ~/.playwriter/cdp.jsonl
+```
+
+#### Monitor real-time CDP events
+```bash
+# Watch CDP events as they happen
+tail -f ~/.playwriter/cdp.jsonl | jq -r '.direction + " " + (.message.method // "response")'
+```

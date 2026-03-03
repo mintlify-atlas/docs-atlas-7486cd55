@@ -1,0 +1,400 @@
+---
+title: Accessibility Snapshots
+description: How Playwriter generates text-based page snapshots with visual labels for AI agents to identify and interact with elements
+---
+
+Playwriter uses **accessibility snapshots** to give AI agents a text-based view of web pages. Instead of sending screenshots (100KB+ images), snapshots provide a compact, searchable tree of interactive elements with ready-to-use locators.
+
+## What is an Accessibility Snapshot?
+
+An accessibility snapshot is a text tree representation of the browser's **accessibility tree** (the same data screen readers use). It shows:
+
+- Semantic roles (`button`, `link`, `textbox`, `heading`, etc.)
+- Accessible names (button text, link text, input labels)
+- Playwright locators you can use immediately
+- Element refs for visual label lookup
+
+**Example output:**
+
+```md
+- banner:
+  - link "Home" [id="nav-home"]
+  - navigation:
+    - link "Docs" [data-testid="docs-link"]
+    - link "Blog" role=link[name="Blog"]
+- main:
+  - heading "Welcome" role=heading[name="Welcome"]
+  - button "Get Started" [data-testid="cta-button"]
+```
+
+Each interactive line ends with a **Playwright locator** you can pass directly to `page.locator()`.
+
+## Why Use Snapshots Instead of Screenshots?
+
+<Note>
+**Token efficiency:** Snapshots are 5-20KB of text. Screenshots are 100KB+ images. For simple text-heavy pages, snapshots save 95% of tokens.
+</Note>
+
+**When to use snapshots:**
+
+- Page has simple, semantic HTML structure
+- You need to search for specific text or patterns
+- You want to process the output programmatically (filter, map, search)
+- Token usage matters (always prefer text over images when possible)
+
+**When to use screenshots with labels:**
+
+- Page has complex visual layout (grids, galleries, maps, dashboards)
+- Spatial position matters ("first image", "top-left button")
+- DOM order doesn't match visual order
+- You need to understand visual hierarchy
+
+See [choosing between snapshot methods](https://github.com/remorses/playwriter/blob/main/playwriter/src/skill.md#choosing-between-snapshot-methods) for details.
+
+## How It Works
+
+**Source:** `playwriter/src/aria-snapshot.ts`
+
+### 1. Fetch Accessibility Tree via CDP
+
+Playwriter uses Chrome DevTools Protocol to get the full accessibility tree:
+
+```typescript
+const { nodes: axNodes } = await session.send(
+  'Accessibility.getFullAXTree',
+  frameId ? { frameId } : undefined,
+  oopifSessionId,
+)
+```
+
+The accessibility tree includes:
+
+- Role (button, link, heading, etc.)
+- Accessible name (computed from text content, aria-label, title, etc.)
+- Backend DOM node ID (for mapping to HTML elements)
+
+### 2. Map to DOM Attributes
+
+To generate stable locators, Playwriter fetches the full DOM tree and maps AX nodes to DOM attributes:
+
+```typescript
+const { nodes: domNodes } = await session.send(
+  'DOM.getFlattenedDocument',
+  { depth: -1, pierce: true },
+  oopifSessionId,
+)
+
+const domByBackendId = new Map<Protocol.DOM.BackendNodeId, DomNodeInfo>()
+for (const node of domNodes) {
+  const info: DomNodeInfo = {
+    nodeId: node.nodeId,
+    backendNodeId: node.backendNodeId,
+    nodeName: node.nodeName,
+    attributes: toAttributeMap(node.attributes),
+  }
+  domByBackendId.set(node.backendNodeId, info)
+}
+```
+
+### 3. Filter Interactive Elements
+
+The raw AX tree includes **every DOM node**. Playwriter filters to show only:
+
+- **Interactive elements:** buttons, links, inputs, checkboxes, sliders, etc.
+- **Context elements:** navigation, main, form, list, table (for structure)
+- **Labels:** Text that labels interactive elements (for clarity)
+
+```typescript
+const INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'textbox', 'combobox', 'checkbox', 'radio',
+  'slider', 'switch', 'menuitem', 'tab', 'img', 'video', 'audio',
+])
+
+const CONTEXT_ROLES = new Set([
+  'navigation', 'main', 'contentinfo', 'banner', 'form',
+  'section', 'list', 'table', 'row', 'cell',
+])
+```
+
+**Wrapper hoisting:** Empty `<div>` and `<span>` wrappers (role=generic) are collapsed to reduce noise.
+
+### 4. Generate Locators
+
+For each interactive element, Playwriter generates a **stable locator**:
+
+**Priority order:**
+
+1. **Test IDs** (most stable): `[data-testid="submit"]`, `[data-test-id="login"]`, etc.
+2. **HTML IDs**: `[id="nav-home"]`
+3. **Role + name**: `role=button[name="Submit"]`
+4. **Role only**: `role=button` (if no accessible name)
+
+```typescript
+function buildBaseLocator({
+  role,
+  name,
+  stable,
+}: {
+  role: string
+  name: string
+  stable: { value: string; attr: string } | null
+}): string {
+  if (stable) {
+    return `[${stable.attr}="${escapeLocatorValue(stable.value)}"]`
+  }
+  const trimmedName = name.trim()
+  if (trimmedName.length > 0) {
+    return `role=${role}[name="${escapeLocatorValue(trimmedName)}"]`
+  }
+  return `role=${role}`
+}
+```
+
+**Deduplication:** If multiple elements share the same locator, Playwright's `>> nth=N` is appended:
+
+```md
+- button "Delete" role=button[name="Delete"] >> nth=0
+- button "Delete" role=button[name="Delete"] >> nth=1
+```
+
+### 5. Generate Refs for Visual Labels
+
+Refs are short identifiers (`e1`, `e2`, ...) used in visual labels. They're generated from:
+
+- **Stable test IDs** (preferred): `submit-btn`, `nav-home`
+- **Fallback counter**: `e1`, `e2`, `e3` (when no test ID exists)
+
+```typescript
+const createRefForNode = (options: {
+  backendNodeId?: Protocol.DOM.BackendNodeId
+  role: string
+  name: string
+}): string | null => {
+  const domInfo = options.backendNodeId ? domByBackendId.get(options.backendNodeId) : undefined
+  const stable = domInfo ? getStableRefFromAttributes(domInfo.attributes) : null
+  let baseRef = stable?.value || `e${++fallbackCounter}`
+  
+  const count = refCounts.get(baseRef) ?? 0
+  refCounts.set(baseRef, count + 1)
+  const ref = count === 0 ? baseRef : `${baseRef}-${count + 1}`
+  
+  refs.push({ ref, role: options.role, name: options.name })
+  return ref
+}
+```
+
+## Visual Labels (Vimium-Style)
+
+For screenshots, Playwriter overlays **visual labels** on interactive elements:
+
+```javascript
+await screenshotWithAccessibilityLabels({ page })
+```
+
+This:
+
+1. Calls `showAriaRefLabels()` to render colored badges with refs (e.g., `[e3]`, `[submit-btn]`)
+2. Takes a screenshot with labels visible
+3. Calls `hideAriaRefLabels()` to remove badges
+4. Returns screenshot + accessibility snapshot
+
+**Label colors (role-based):**
+
+- **Yellow:** Links
+- **Orange:** Buttons
+- **Coral:** Inputs
+- **Pink:** Checkboxes
+- **Peach:** Sliders
+- **Salmon:** Menus
+- **Amber:** Tabs
+
+**Implementation:** Labels are positioned using CDP `DOM.getBoxModel` to get element bounding boxes:
+
+```typescript
+const { model } = await session.send('DOM.getBoxModel', {
+  backendNodeId: ref.backendNodeId,
+})
+const box = buildBoxFromQuad(model.border)
+// box = { x, y, width, height }
+```
+
+Labels are rendered in-page using `page.evaluate()` with a pre-built client script (`a11y-client.js`).
+
+## Using Snapshot Locators
+
+**Rule:** Use snapshot locators directly - never invent selectors.
+
+The snapshot output **is** the selector. Copy it verbatim into `page.locator()`:
+
+```javascript
+// Snapshot shows: [data-testid="submit-btn"]
+await page.locator('[data-testid="submit-btn"]').click()
+
+// Snapshot shows: role=link[name="SIGN IN"]
+await page.locator('role=link[name="SIGN IN"]').click()
+
+// Snapshot shows: role=button[name="Delete"] >> nth=1
+await page.locator('role=button[name="Delete"] >> nth=1').click()
+```
+
+**Common mistake:** Guessing CSS selectors or `getByText()` when the snapshot already gives you the exact match.
+
+## Scoping Snapshots
+
+Pass a `locator` to snapshot only a **subtree**:
+
+```javascript
+// Full page snapshot: ~150 lines (sidebar, nav, header, footer, everything)
+await snapshot({ page })
+
+// Scoped to main: ~20 lines (just the content you care about)
+await snapshot({ locator: page.locator('main') })
+
+// Scope to a dialog
+await snapshot({ locator: page.locator('[role="dialog"]') })
+```
+
+**When to scope:**
+
+- Full page snapshot is dominated by navigation/layout you don't need
+- You only care about one section (modal, form, sidebar, etc.)
+- Snapshot is too large and you want to reduce token usage
+
+## Filtering Snapshots
+
+Use `search` parameter to filter by regex:
+
+```javascript
+// Show only buttons and submit elements
+const snap = await snapshot({ page, search: /button|submit/i })
+
+// Find error messages
+const errors = await snapshot({ page, search: /error|fail/i })
+
+// Find dialog or modal
+const modal = await snapshot({ page, search: /dialog|modal/i })
+```
+
+Returns **first 10 matching lines** with context.
+
+**For complex filtering**, filter the snapshot string directly in JavaScript:
+
+```javascript
+const snap = await snapshot({ page, showDiffSinceLastCall: false })
+const relevant = snap.split('\n')
+  .filter(l => l.includes('dialog') || l.includes('error') || l.includes('button'))
+  .join('\n')
+console.log(relevant)
+```
+
+## Diffing (Incremental Snapshots)
+
+Snapshots track **changes since last call** to reduce output:
+
+- **First call:** Returns full snapshot
+- **Subsequent calls:** Returns diff (if shorter than full snapshot)
+- **No changes:** Returns "No changes since last snapshot"
+
+**Disable diffing:**
+
+```javascript
+await snapshot({ page, showDiffSinceLastCall: false })  // Always full output
+```
+
+**Diffing with search:**
+
+```javascript
+// By default, search returns full matches (diffing disabled)
+await snapshot({ page, search: /button/ })
+
+// Enable diffing + search together
+await snapshot({ page, search: /button/, showDiffSinceLastCall: true })
+```
+
+## iframe Support
+
+Snapshots work with iframes (including **out-of-process iframes** / OOPIFs):
+
+```javascript
+// Snapshot the main page
+const mainSnap = await snapshot({ page })
+
+// Snapshot a specific iframe
+const frame = await page.locator('iframe').contentFrame()
+const frameSnap = await snapshot({ frame })
+```
+
+**How it works:**
+
+1. Resolve `FrameLocator` to actual `Frame` object
+2. Check if iframe is cross-origin (OOPIF)
+3. If OOPIF, attach CDP session to iframe target
+4. Fetch AX tree and DOM tree from iframe session
+5. Detach CDP session when done
+
+See `resolveFrame()` in `aria-snapshot.ts` for implementation.
+
+## API Reference
+
+### snapshot()
+
+```typescript
+await snapshot({
+  page: Page,
+  frame?: Frame | FrameLocator,
+  locator?: Locator,
+  search?: string | RegExp,
+  showDiffSinceLastCall?: boolean,  // default: true (false when search provided)
+})
+```
+
+**Returns:** Accessibility snapshot as a string.
+
+### screenshotWithAccessibilityLabels()
+
+```typescript
+await screenshotWithAccessibilityLabels({
+  page: Page,
+  locator?: Locator,
+  interactiveOnly?: boolean,  // default: true
+  collector: ScreenshotResult[],  // MCP tool injects this
+})
+```
+
+**Returns:** void (screenshot + snapshot are added to `collector` array)
+
+### getAriaSnapshot()
+
+Low-level API that returns snapshot + utilities:
+
+```typescript
+const {
+  snapshot,           // String tree
+  tree,               // AriaSnapshotNode[] for programmatic use
+  refs,               // AriaRef[] with role, name, ref, shortRef
+  getSelectorForRef,  // (ref: string) => string | null
+  getRefForLocator,   // (locator) => Promise<AriaRef | null>
+} = await getAriaSnapshot({ page })
+
+const selector = getSelectorForRef('submit-btn')
+await page.locator(selector).click()
+```
+
+## Performance
+
+**Snapshot generation time:**
+
+- Simple page (10-20 elements): ~50ms
+- Complex page (100+ elements): ~200ms
+- With visual labels (CDP box model): +500-1000ms (parallelized with concurrency: 24)
+
+**Optimization tips:**
+
+- Use `locator` to scope snapshots to subtrees
+- Use `search` to filter results server-side
+- Call `snapshot()` before `screenshot()` to avoid double CDP round-trips
+
+## Related
+
+- [Architecture](/concepts/architecture) - How CDP is used for browser control
+- Playwriter Skill Docs - Best practices for using snapshots in AI workflows

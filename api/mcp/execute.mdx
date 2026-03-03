@@ -1,0 +1,168 @@
+---
+title: execute
+description: Execute JavaScript code in the browser context with Playwright
+---
+
+Executes JavaScript code in the browser context with access to Playwright's `page`, `context`, and a persistent `state` object.
+
+## Parameters
+
+<ParamField path="code" type="string" required>
+  JavaScript Playwright code to execute. Has `{page, state, context}` in scope.
+  
+  Should be one line, using `;` to execute multiple statements. You MUST call execute multiple times instead of writing complex scripts in a single tool call.
+  
+  ```javascript
+  await page.goto('https://example.com'); await page.click('button')
+  ```
+</ParamField>
+
+<ParamField path="timeout" type="number" default={10000}>
+  Timeout in milliseconds for code execution.
+  
+  Default: `10000` (10 seconds)
+</ParamField>
+
+## Response
+
+<ResponseField name="content" type="array">
+  Array of content items returned from the execution.
+  
+  <Expandable title="Content items">
+    <ResponseField name="type" type="string">
+      Type of content: `"text"` or `"image"`
+    </ResponseField>
+    
+    <ResponseField name="text" type="string">
+      Text result when type is `"text"`
+    </ResponseField>
+    
+    <ResponseField name="data" type="string">
+      Base64 encoded image data when type is `"image"`
+    </ResponseField>
+    
+    <ResponseField name="mimeType" type="string">
+      MIME type of the image (e.g., `"image/png"`) when type is `"image"`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="isError" type="boolean">
+  Whether the execution resulted in an error
+</ResponseField>
+
+## Usage Examples
+
+### Navigate to a page
+
+```javascript
+{
+  "code": "await page.goto('https://example.com')",
+  "timeout": 30000
+}
+```
+
+### Click an element
+
+```javascript
+{
+  "code": "await page.click('button[type=\"submit\"]')"
+}
+```
+
+### Get text content
+
+```javascript
+{
+  "code": "await page.textContent('h1')"
+}
+```
+
+### Take a screenshot
+
+```javascript
+{
+  "code": "await page.screenshot()"
+}
+```
+
+This returns an image in the response content array.
+
+### Use persistent state
+
+```javascript
+{
+  "code": "state.counter = (state.counter || 0) + 1; state.counter"
+}
+```
+
+The `state` object persists across execute calls until reset.
+
+### Multiple statements
+
+```javascript
+{
+  "code": "await page.fill('#username', 'user'); await page.fill('#password', 'pass'); await page.click('#login')",
+  "timeout": 15000
+}
+```
+
+## Error Handling
+
+### Timeout errors
+
+If code execution exceeds the timeout, an error response is returned:
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Error executing code: Timeout exceeded"
+    }
+  ],
+  "isError": true
+}
+```
+
+### Connection errors
+
+If there are CDP connection issues or the browser/page is closed:
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Error executing code: Target closed\n\n[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call the `reset` tool to reconnect. Do NOT reset for other non-connection non-internal errors.]"
+    }
+  ],
+  "isError": true
+}
+```
+
+When you see this hint, call the [`reset`](/api/mcp/reset) tool to re-establish the connection.
+
+### Code execution errors
+
+If the JavaScript code throws an error:
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Error executing code: ReferenceError: unknownVar is not defined\n    at eval:1:1"
+    }
+  ],
+  "isError": true
+}
+```
+
+## Best Practices
+
+- Keep code simple - one logical operation per execute call
+- Use appropriate timeouts for slow operations (e.g., navigation, network requests)
+- Store intermediate results in `state` for multi-step workflows
+- Handle errors appropriately - use `reset` only for connection issues
+- Use semicolons to chain multiple statements on one line when needed

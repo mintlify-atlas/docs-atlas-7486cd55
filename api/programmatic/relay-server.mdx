@@ -1,0 +1,144 @@
+---
+title: 'CDP Relay Server'
+description: 'Start the CDP relay server and connect Playwright to your Chrome'
+---
+
+The relay server bridges Playwright with the Playwriter Chrome extension over WebSocket.
+
+## Starting the Server
+
+### startPlayWriterCDPRelayServer
+
+Starts a WebSocket relay server that connects Playwright to your Chrome browser via the extension.
+
+```typescript
+import { startPlayWriterCDPRelayServer } from 'playwriter'
+
+const server = await startPlayWriterCDPRelayServer({
+  port: 19988,
+  host: '127.0.0.1',
+  token: 'optional-auth-token',
+  logger: console,
+})
+
+// Later:
+server.close()
+```
+
+**Parameters:**
+
+<ParamField path="port" type="number" default="19988">
+  WebSocket server port
+</ParamField>
+
+<ParamField path="host" type="string" default="127.0.0.1">
+  Host to bind the server to
+</ParamField>
+
+<ParamField path="token" type="string">
+  Optional authentication token for remote access
+</ParamField>
+
+<ParamField path="logger" type="object">
+  Logger with `log(...)` and `error(...)` methods (e.g., `console`)
+</ParamField>
+
+**Returns:** `Promise<RelayServer>`
+
+```typescript
+type RelayServer = {
+  close(): void
+  on<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]): void
+  off<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]): void
+}
+```
+
+## Getting the CDP URL
+
+### getCdpUrl
+
+Returns the WebSocket URL for connecting Playwright to the relay server.
+
+```typescript
+import { getCdpUrl } from 'playwriter'
+
+const url = getCdpUrl({ port: 19988 })
+// 'ws://127.0.0.1:19988/cdp'
+```
+
+**Parameters:**
+
+<ParamField path="port" type="number" default="19988">
+  The relay server port
+</ParamField>
+
+**Returns:** `string` - WebSocket URL for Playwright
+
+## Connecting with Playwright
+
+Once the server is running, connect Playwright using `connectOverCDP`:
+
+```typescript
+import { chromium } from 'playwright-core'
+import { startPlayWriterCDPRelayServer, getCdpUrl } from 'playwriter'
+
+const server = await startPlayWriterCDPRelayServer()
+const browser = await chromium.connectOverCDP(getCdpUrl())
+
+const page = browser.contexts()[0].pages()[0]
+await page.goto('https://example.com')
+
+// Don't call browser.close() - it closes the user's Chrome!
+server.close()
+```
+
+<Warning>
+  Never call `browser.close()` when connected to the user's Chrome - it will close all their tabs!
+</Warning>
+
+## Remote Access
+
+For remote access over the internet or LAN, use the `token` parameter:
+
+**Host:**
+```bash
+npx -y playwriter serve --token my-secret
+```
+
+**Client:**
+```typescript
+const browser = await chromium.connectOverCDP(
+  'ws://remote-host:19988/cdp?token=my-secret'
+)
+```
+
+See [Remote Access](/guides/remote-access) for more details on tunneling with traforo.
+
+## Server Events
+
+The relay server emits events you can listen to:
+
+```typescript
+server.on('cdp:command', ({ clientId, command }) => {
+  console.log('CDP command from Playwright:', command.method)
+})
+
+server.on('cdp:event', ({ event, sessionId }) => {
+  console.log('CDP event from extension:', event.method)
+})
+
+server.on('cdp:response', ({ clientId, response }) => {
+  console.log('CDP response to Playwright')
+})
+```
+
+## Multiple Extensions
+
+If you have multiple Chrome profiles with Playwriter installed, specify which one to use:
+
+```typescript
+const url = getCdpUrl({ port: 19988, extensionId: 'profile:user@example.com' })
+const browser = await chromium.connectOverCDP(url)
+```
+
+The relay server automatically selects the extension with active tabs if only one is active.

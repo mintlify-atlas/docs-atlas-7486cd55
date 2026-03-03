@@ -1,0 +1,361 @@
+---
+title: Best Practices
+description: Guidelines for effective browser automation with Playwriter CLI
+---
+
+Follow these best practices to write reliable, maintainable browser automation scripts.
+
+## Session and state management
+
+### Always use your own session
+
+Pass `-s <id>` to all commands. Using the same session preserves your `state` between calls:
+
+```bash
+playwriter session new  # outputs: 1
+playwriter -s 1 -e 'state.counter = 0'
+playwriter -s 1 -e 'state.counter++; console.log(state.counter)'  # prints 1
+```
+
+### Store your own page in state
+
+Pages are shared across all sessions. Create your own page to avoid interference:
+
+```bash
+# First execute call: get or create your page
+playwriter -s 1 -e 'state.page = context.pages().find(p => p.url() === "about:blank") ?? await context.newPage(); await state.page.goto("https://example.com")'
+
+# All subsequent calls: use state.page
+playwriter -s 1 -e 'await state.page.click("button")'
+```
+
+### Handle page closures gracefully
+
+Users may close tabs accidentally. Check before using:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+if (!state.page || state.page.isClosed()) {
+  state.page = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
+}
+await state.page.goto('https://example.com');
+EOF
+)"
+```
+
+## Interaction feedback loop
+
+Every browser interaction should follow an **observe → act → observe** loop:
+
+1. **Observe** - Print URL and take snapshot
+2. **Check** - Verify page is ready
+3. **Act** - Perform one action
+4. **Observe again** - Verify the action's effect
+5. **Repeat** - Continue until task is complete
+
+```bash
+# 1. Observe - always print URL first
+playwriter -s 1 -e "$(cat <<'EOF'
+state.page = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
+await state.page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
+console.log('URL:', state.page.url());
+await snapshot({ page: state.page }).then(console.log);
+EOF
+)"
+
+# 2. Act - click a button
+playwriter -s 1 -e 'await state.page.click("button#submit")'
+
+# 3. Observe again - verify what happened
+playwriter -s 1 -e "$(cat <<'EOF'
+console.log('URL:', state.page.url());
+await snapshot({ page: state.page }).then(console.log);
+EOF
+)"
+```
+
+## Quoting and escaping
+
+### Always use single quotes for -e
+
+Single quotes prevent bash from interpreting `$`, backticks, and backslashes:
+
+```bash
+# GOOD
+playwriter -s 1 -e 'const price = text.match(/\$[\d.]+/)'
+
+# BAD - bash corrupts the regex
+playwriter -s 1 -e "const price = text.match(/\$[\d.]+/)"
+```
+
+### Use heredoc for complex code
+
+When code contains mixed quotes, regex, or multiple lines:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const links = await state.page.$$eval('a', els => els.map(e => e.href));
+const prices = html.match(/\$[\d.]+/g);
+console.log(`Found ${links.length} links`);
+EOF
+)"
+```
+
+## Choosing the right observation method
+
+### Use snapshot for most cases
+
+Snapshots are fast, cheap, and text-based:
+
+```bash
+# Check if element appeared
+playwriter -s 1 -e 'await snapshot({ page: state.page, search: /button|submit/i })'
+
+# Verify action succeeded
+playwriter -s 1 -e 'await snapshot({ page: state.page, search: /success|error/i })'
+```
+
+### Use screenshot only for visual issues
+
+Screenshots consume more tokens and are slower:
+
+```bash
+# GOOD: snapshot for text content
+playwriter -s 1 -e 'await snapshot({ page: state.page, search: /price/i })'
+
+# GOOD: screenshot for visual layout
+playwriter -s 1 -e 'await screenshotWithAccessibilityLabels({ page: state.page })'
+
+# BAD: screenshot just to check text
+playwriter -s 1 -e 'await state.page.screenshot({ path: "check.png" })'  # wasteful
+```
+
+### Reserve page.evaluate for specific use cases
+
+Don't use `page.evaluate()` to inspect the DOM - use `snapshot()` instead:
+
+```bash
+# BAD: manual DOM inspection
+playwriter -s 1 -e 'await state.page.evaluate(() => document.querySelector(".btn")?.className)'
+
+# GOOD: snapshot shows all interactive elements
+playwriter -s 1 -e 'await snapshot({ page: state.page, search: /btn/i })'
+
+# GOOD: evaluate for state modification
+playwriter -s 1 -e 'await state.page.evaluate(() => localStorage.clear())'
+```
+
+## Multiple execute calls vs single call
+
+Use multiple execute calls for complex logic - it helps understand intermediate state:
+
+```bash
+# GOOD: Multiple calls show progress
+playwriter -s 1 -e 'await state.page.goto("https://example.com")'
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+playwriter -s 1 -e 'await state.page.click("button")'
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+
+# ACCEPTABLE: Single call for simple sequences
+playwriter -s 1 -e 'await state.page.goto("https://example.com"); await state.page.click("button")'
+```
+
+## Waiting and timeouts
+
+### Prefer proper waits over arbitrary timeouts
+
+```bash
+# GOOD: Wait for specific condition
+playwriter -s 1 -e 'await state.page.waitForSelector(".content")'
+playwriter -s 1 -e 'await waitForPageLoad({ page: state.page, timeout: 5000 })'
+
+# ACCEPTABLE: Short timeout for non-deterministic events
+playwriter -s 1 -e 'await state.page.waitForTimeout(1000)'  # popup animation
+
+# BAD: Long arbitrary timeout
+playwriter -s 1 -e 'await state.page.waitForTimeout(5000)'  # wasteful
+```
+
+### Use waitForLoadState correctly
+
+```bash
+# GOOD
+playwriter -s 1 -e 'await state.page.waitForLoadState("domcontentloaded")'
+
+# BAD - times out if already loaded
+playwriter -s 1 -e 'await state.page.waitForEvent("load")'
+```
+
+## Selector best practices
+
+### Use snapshot locators directly
+
+The snapshot output gives you ready-to-use locators:
+
+```bash
+# 1. Get snapshot
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+# Output: role=button[name="Submit"]
+
+# 2. Use the locator directly
+playwriter -s 1 -e 'await state.page.getByRole("button", { name: "Submit" }).click()'
+```
+
+Never invent selectors - always use what the snapshot provides.
+
+### Beware CSS text-transform
+
+Snapshots show visual text, but DOM may differ:
+
+```bash
+# Snapshot shows: heading "NODE.JS"
+# But DOM has: "Node.js"
+
+# GOOD: Case-insensitive
+playwriter -s 1 -e 'await state.page.getByRole("heading", { name: /node\.js/i }).click()'
+
+# BAD: Case-sensitive
+playwriter -s 1 -e 'await state.page.getByRole("heading", { name: "NODE.JS" }).click()'
+```
+
+## Clean up listeners
+
+Always remove event listeners when done:
+
+```bash
+# After using request/response listeners
+playwriter -s 1 -e "$(cat <<'EOF'
+state.page.removeAllListeners('request');
+state.page.removeAllListeners('response');
+EOF
+)"
+```
+
+## Navigation best practices
+
+### Use domcontentloaded for goto
+
+```bash
+playwriter -s 1 -e 'await state.page.goto("https://example.com", { waitUntil: "domcontentloaded" })'
+playwriter -s 1 -e 'await waitForPageLoad({ page: state.page, timeout: 5000 })'
+```
+
+### Always print URL after actions
+
+Pages can redirect unexpectedly:
+
+```bash
+playwriter -s 1 -e 'await state.page.click("a.login"); console.log("URL:", state.page.url())'
+```
+
+## Common patterns
+
+### Network interception
+
+Store requests in state for analysis:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+state.requests = [];
+state.page.on('request', req => {
+  if (req.url().includes('/api/')) {
+    state.requests.push({ url: req.url(), method: req.method() });
+  }
+});
+EOF
+)"
+
+# Trigger actions
+playwriter -s 1 -e 'await state.page.click("button")'
+
+# Analyze captured data
+playwriter -s 1 -e 'console.log(JSON.stringify(state.requests, null, 2))'
+```
+
+### Authenticated fetches
+
+Fetch from within page context to include session cookies:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const data = await state.page.evaluate(async (url) => {
+  const resp = await fetch(url);
+  return await resp.json();
+}, 'https://example.com/api/protected');
+console.log(JSON.stringify(data, null, 2));
+EOF
+)"
+```
+
+### Working with iframes
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const frame = await state.page.locator('iframe').contentFrame();
+await snapshot({ frame });
+EOF
+)"
+```
+
+## Things to avoid
+
+### Never close browser or context
+
+```bash
+# BAD - closes the user's Chrome
+playwriter -s 1 -e 'await browser.close()'
+playwriter -s 1 -e 'await context.close()'
+```
+
+Only close pages you created, and only if the user asks.
+
+### Never use bringToFront unless requested
+
+```bash
+# BAD - disruptive and unnecessary
+playwriter -s 1 -e 'await state.page.bringToFront()'
+```
+
+You can interact with background pages.
+
+### Never use force clicks or dispatchEvent
+
+```bash
+# BAD - bypasses React/Vue handlers
+playwriter -s 1 -e 'await state.page.click(".btn", { force: true })'
+playwriter -s 1 -e 'await state.page.evaluate(() => document.querySelector(".btn").click())'
+
+# GOOD - find the real interactive element
+playwriter -s 1 -e 'await snapshot({ page: state.page, search: /button/i })'
+playwriter -s 1 -e 'await state.page.getByRole("button", { name: "Submit" }).click()'
+```
+
+### Never use newCDPSession directly
+
+```bash
+# BAD - doesn't work through Playwriter relay
+playwriter -s 1 -e 'await state.page.context().newCDPSession()'
+
+# GOOD - use getCDPSession utility
+playwriter -s 1 -e 'state.cdp = await getCDPSession({ page: state.page })'
+```
+
+## Debugging
+
+When something doesn't work:
+
+1. **Print URL** - Confirm you're on the right page
+2. **Take snapshot** - See what's actually there
+3. **Check logs** - Look for console errors
+
+```bash
+playwriter -s 1 -e 'console.log("URL:", state.page.url())'
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+playwriter -s 1 -e 'await getLatestLogs({ page: state.page, search: /error/i })'
+```
+
+For internal Playwriter errors, check the relay server logs:
+
+```bash
+playwriter logfile
+```

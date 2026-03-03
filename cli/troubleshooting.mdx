@@ -1,0 +1,444 @@
+---
+title: Troubleshooting
+description: Common issues and debugging tips for Playwriter CLI
+---
+
+This guide helps you diagnose and fix common Playwriter CLI issues.
+
+## Connection issues
+
+### "No connected browsers detected"
+
+The Playwriter extension is not active on any tabs.
+
+**Solution:**
+
+1. Click the Playwriter extension icon on any tab
+2. The icon turns green when connected
+3. Try your command again
+
+### "Warning: Extension not connected"
+
+The extension lost connection to the relay server.
+
+**Solution:**
+
+1. Restart Chrome:
+   ```bash
+   # macOS
+   open -a "Google Chrome" --args --profile-directory=Default
+
+   # Linux
+   google-chrome --profile-directory=Default &
+
+   # Windows (PowerShell)
+   Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
+   ```
+
+2. Click the extension icon on a tab
+3. Retry your command
+
+### "Error: Cannot connect to relay server"
+
+The relay server failed to start or crashed.
+
+**Solution:**
+
+1. Check if port 19988 is in use:
+   ```bash
+   # macOS/Linux
+   lsof -ti :19988
+
+   # Windows (PowerShell)
+   Get-NetTCPConnection -LocalPort 19988
+   ```
+
+2. Kill any process on port 19988:
+   ```bash
+   # macOS/Linux
+   kill $(lsof -ti :19988)
+
+   # Windows (PowerShell)
+   Get-NetTCPConnection -LocalPort 19988 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+   ```
+
+3. Check relay server logs:
+   ```bash
+   playwriter logfile
+   ```
+
+4. Read the log file to understand the issue
+
+## Session issues
+
+### "Error: -s/--session is required"
+
+You forgot to specify a session ID.
+
+**Solution:**
+
+Create a session first:
+
+```bash
+playwriter session new
+```
+
+Then use the session ID:
+
+```bash
+playwriter -s 1 -e 'await page.goto("https://example.com")'
+```
+
+### Session state not persisting
+
+You're using different session IDs for related commands.
+
+**Solution:**
+
+Always use the same session ID (`-s`) for commands that should share state:
+
+```bash
+playwriter -s 1 -e 'state.data = "hello"'
+playwriter -s 1 -e 'console.log(state.data)'  # prints "hello"
+```
+
+### "Session not found" error
+
+The session was deleted or the relay server restarted.
+
+**Solution:**
+
+Create a new session:
+
+```bash
+playwriter session new
+```
+
+### Connection reset needed
+
+The browser connection became stale.
+
+**Solution:**
+
+```bash
+playwriter session reset <sessionId>
+```
+
+This reconnects to the browser while preserving the session's `state`.
+
+## Execution errors
+
+### Timeout errors
+
+The code took longer than the timeout (default 10 seconds).
+
+**Solution:**
+
+Increase the timeout:
+
+```bash
+playwriter -s 1 --timeout 30000 -e 'await state.page.waitForSelector(".slow")'
+```
+
+For video processing or long operations, use even longer timeouts:
+
+```bash
+playwriter -s 1 --timeout 120000 -e 'await createDemoVideo({ ... })'
+```
+
+### "Selector not found" errors
+
+The element doesn't exist or the page isn't ready.
+
+**Solution:**
+
+1. Take a snapshot to see what's actually on the page:
+   ```bash
+   playwriter -s 1 -e 'await snapshot({ page: state.page })'
+   ```
+
+2. Wait for the page to load:
+   ```bash
+   playwriter -s 1 -e 'await waitForPageLoad({ page: state.page, timeout: 5000 })'
+   ```
+
+3. Use the correct locator from the snapshot output
+
+### "Page is closed" error
+
+The page was closed by the user or another script.
+
+**Solution:**
+
+Check if the page is closed before using it:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+if (!state.page || state.page.isClosed()) {
+  state.page = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
+}
+await state.page.goto('https://example.com');
+EOF
+)"
+```
+
+### Syntax errors in JavaScript
+
+Bash interpreted special characters in your code.
+
+**Solution:**
+
+Always use single quotes for `-e`:
+
+```bash
+# GOOD
+playwriter -s 1 -e 'const price = text.match(/\$[\d.]+/)'
+
+# BAD - bash corrupts the regex
+playwriter -s 1 -e "const price = text.match(/\$[\d.]+/)"
+```
+
+For complex code, use heredoc:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+const data = await state.page.evaluate(() => {
+  return document.querySelector('.price')?.textContent;
+});
+EOF
+)"
+```
+
+## Browser and page issues
+
+### All pages return "about:blank"
+
+Chrome bug in `chrome.debugger` API.
+
+**Solution:**
+
+Restart Chrome:
+
+```bash
+# macOS
+open -a "Google Chrome" --args --profile-directory=Default
+
+# Linux
+google-chrome --profile-directory=Default &
+
+# Windows (PowerShell)
+Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
+```
+
+### Browser switches to light mode on connect
+
+Known [Playwright issue](https://github.com/microsoft/playwright/issues/37627).
+
+**Solution:**
+
+No fix yet. This is a Playwright limitation.
+
+### Multiple browsers detected
+
+You have multiple Chrome profiles or browsers with Playwriter enabled.
+
+**Solution:**
+
+Specify which browser to use:
+
+```bash
+playwriter session new --browser abc123def456
+```
+
+The stable key is shown in the table when you run `playwriter session new` without `--browser`.
+
+## Logging and debugging
+
+### View relay server logs
+
+The relay server logs contain extension, MCP, and WebSocket server logs.
+
+```bash
+playwriter logfile
+```
+
+**Example output:**
+
+```
+relay: /Users/username/.playwriter/relay-server.log
+cdp: /Users/username/.playwriter/cdp.jsonl
+```
+
+**Read the relay log:**
+
+```bash
+tail -f ~/.playwriter/relay-server.log
+```
+
+**Read the CDP log:**
+
+The CDP log is a JSONL file (one JSON object per line) with all CDP commands, responses, and events.
+
+```bash
+# View recent CDP traffic
+tail -n 100 ~/.playwriter/cdp.jsonl
+
+# Summarize CDP traffic by direction + method
+jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
+
+# Filter for specific CDP events
+jq 'select(.message.method == "Page.loadEventFired")' ~/.playwriter/cdp.jsonl
+```
+
+### Debug page state
+
+Use these commands to understand what's happening:
+
+```bash
+# Print current URL
+playwriter -s 1 -e 'console.log("URL:", state.page.url())'
+
+# Take accessibility snapshot
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+
+# Search for specific elements
+playwriter -s 1 -e 'await snapshot({ page: state.page, search: /button|error/i })'
+
+# Check console logs
+playwriter -s 1 -e 'await getLatestLogs({ page: state.page, search: /error/i })'
+```
+
+### Extension not updating
+
+After updating the extension, Chrome may cache the old version.
+
+**Solution:**
+
+1. Open `chrome://extensions/`
+2. Click the reload button on the Playwriter extension
+3. Retry your command
+
+## Remote access issues
+
+### "Authentication token is required"
+
+You're trying to bind to a public host without a token.
+
+**Solution:**
+
+Provide a token when using `0.0.0.0`:
+
+```bash
+playwriter serve --host 0.0.0.0 --token my-secret-token
+```
+
+Or set the environment variable:
+
+```bash
+export PLAYWRITER_TOKEN=my-secret-token
+playwriter serve --host 0.0.0.0
+```
+
+### Connection refused from remote machine
+
+The relay server is only listening on localhost.
+
+**Solution:**
+
+Start the server with a public host:
+
+```bash
+# For LAN access
+playwriter serve --host 0.0.0.0 --token my-secret-token
+
+# For Docker
+playwriter serve --host localhost  # containers use host.docker.internal
+```
+
+Then connect from the remote machine:
+
+```bash
+export PLAYWRITER_HOST=192.168.1.10  # or https://tunnel.traforo.dev
+export PLAYWRITER_TOKEN=my-secret-token
+playwriter -s 1 -e 'await page.goto("https://example.com")'
+```
+
+## Common mistakes
+
+### Not verifying actions succeeded
+
+Always check page state after important actions.
+
+**Solution:**
+
+Use the observe → act → observe loop:
+
+```bash
+# Observe before
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+
+# Act
+playwriter -s 1 -e 'await state.page.click("button")'
+
+# Observe after
+playwriter -s 1 -e 'console.log("URL:", state.page.url()); await snapshot({ page: state.page })'
+```
+
+### Using stale locators
+
+Locators from old snapshots can become invalid after page updates.
+
+**Solution:**
+
+Always take a fresh snapshot before clicking:
+
+```bash
+# Get fresh snapshot
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
+
+# Use locators from the NEW snapshot
+playwriter -s 1 -e 'await state.page.click("role=button[name=\"Submit\"]")'
+```
+
+### Not cleaning up listeners
+
+Event listeners leak across execute calls.
+
+**Solution:**
+
+Remove listeners when done:
+
+```bash
+playwriter -s 1 -e "$(cat <<'EOF'
+state.page.removeAllListeners('request');
+state.page.removeAllListeners('response');
+EOF
+)"
+```
+
+## Getting help
+
+If you encounter a bug:
+
+1. Check the relay server logs:
+   ```bash
+   playwriter logfile
+   tail -n 100 ~/.playwriter/relay-server.log
+   ```
+
+2. Check the CDP log for protocol-level issues:
+   ```bash
+   tail -n 100 ~/.playwriter/cdp.jsonl
+   ```
+
+3. Create a GitHub issue:
+   ```bash
+   gh issue create -R remorses/playwriter --title "Brief description" --body "Detailed description with logs"
+   ```
+
+Include:
+- Playwriter version (`playwriter --version`)
+- Chrome version
+- Operating system
+- Minimal reproduction steps
+- Relevant log excerpts

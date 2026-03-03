@@ -1,0 +1,165 @@
+---
+title: Architecture
+description: Understand how Playwriter's extension, relay server, and MCP components work together to control your browser
+---
+
+Playwriter uses a unique architecture that connects your existing Chrome browser to Playwright automation via a WebSocket relay server. Unlike traditional browser automation that spawns fresh browsers, Playwriter leverages the browser you already have open with all your logins, extensions, and settings.
+
+## System Architecture
+
+```
++---------------------+     +-------------------+     +-----------------+
+|   BROWSER           |     |   LOCALHOST       |     |   MCP CLIENT    |
+|                     |     |                   |     |                 |
+|  +---------------+  |     | WebSocket Server  |     |  +-----------+  |
+|  |   Extension   |<--------->  :19988         |     |  | AI Agent  |  |
+|  +-------+-------+  | WS  |                   |     |  +-----------+  |
+|          |          |     |  /extension       |     |        |        |
+|    chrome.debugger  |     |       |           |     |        v        |
+|          v          |     |       v           |     |  +-----------+  |
+|  +---------------+  |     |  /cdp/:id <--------------> |  execute  |  |
+|  | Tab 1 (green) |  |     +-------------------+  WS |  +-----------+  |
+|  | Tab 2 (green) |  |                               |        |        |
+|  | Tab 3 (gray)  |  |     Tab 3 not controlled      |  Playwright API |
++---------------------+     (no extension click)      +-----------------+
+```
+
+## Components
+
+### Chrome Extension
+
+The extension acts as a bridge between your browser tabs and the relay server:
+
+- Uses `chrome.debugger` API to attach to tabs where you click the extension icon
+- Connects to WebSocket server at `localhost:19988` via the `/extension` endpoint
+- Receives Chrome DevTools Protocol (CDP) commands from Playwright clients
+- Sends CDP events (page loads, network activity, etc.) back to clients
+- Automatically reconnects when the relay server restarts
+
+**Key behaviors:**
+- Only controls tabs where the icon was clicked (green = active, gray = inactive)
+- Survives server restarts by reconnecting with the same stable key
+- Shows Chrome's automation banner on controlled tabs for transparency
+
+### WebSocket Relay Server
+
+The relay server runs on `localhost:19988` and routes CDP messages:
+
+**Source:** `playwriter/src/relay-state.ts`
+
+- **`/extension`** - WebSocket endpoint for Chrome extension connections
+- **`/cdp/:clientId`** - CDP endpoint for Playwright clients (MCP, CLI, programmatic use)
+- Maintains session state using Zustand for deterministic state transitions
+- Handles reconnections without losing client sessions
+- Logs all CDP traffic to `~/.playwriter/cdp.jsonl` for debugging
+
+**State management:**
+
+```typescript
+export type RelayState = {
+  extensions: Map<string, ExtensionEntry>
+  playwrightClients: Map<string, PlaywrightClient>
+}
+
+export type ExtensionEntry = {
+  id: string
+  info: ExtensionInfo
+  stableKey: string
+  connectedTargets: Map<string, ConnectedTarget>
+  ws: WSContext | null
+  pendingRequests: Map<number, ExtensionPendingRequest>
+  messageId: number
+  pingInterval: ReturnType<typeof setInterval> | null
+}
+```
+
+The server uses **pure state transition functions** that take current state + event data and return new state. No I/O inside reducers - all side effects happen in route handlers.
+
+### MCP Server
+
+The Model Context Protocol server provides a single `execute` tool that:
+
+- Spawns the relay server in the background if not running
+- Connects to relay via Playwright's `connectOverCDP()` API
+- Executes JavaScript code in isolated session sandboxes
+- Returns results back to AI agents (Claude, OpenCode, etc.)
+
+**Source:** `playwriter/src/mcp.ts`
+
+## Communication Flow
+
+### 1. Extension → Relay → Client
+
+When the extension attaches to a tab:
+
+```
+1. Extension sends Target.attachedToTarget event via /extension WebSocket
+2. Relay adds target to extension's connectedTargets map
+3. Relay broadcasts Target.attachedToTarget to all connected Playwright clients
+4. Playwright clients now see the tab in context.pages()
+```
+
+### 2. Client → Relay → Extension
+
+When a client sends a CDP command:
+
+```
+1. Playwright client sends CDP command (e.g. Page.navigate) via /cdp/:clientId
+2. Relay routes command to extension's WebSocket connection
+3. Extension executes command via chrome.debugger
+4. Extension sends CDP response back to relay
+5. Relay returns response to Playwright client
+```
+
+## Session Isolation
+
+Playwriter provides **isolated session sandboxes** for multi-agent workflows:
+
+- Each session has its own `state` object (persisted between `execute()` calls)
+- Sessions share browser tabs (all agents see the same `context.pages()`)
+- To avoid interference, agents create their own pages and store them in `state.page`
+
+See [Sessions](/concepts/sessions) for details.
+
+## Security
+
+Playwriter is designed for local-only automation:
+
+- **Local only:** WebSocket server binds to `localhost:19988` (not `0.0.0.0`)
+- **Origin validation:** Only accepts connections from official extension IDs
+- **Explicit consent:** Only tabs where you clicked the extension icon are controlled
+- **Visible automation:** Chrome shows automation banner on controlled tabs
+- **No remote access by default:** Malicious websites cannot connect
+
+For remote access scenarios (controlling a remote Mac, team collaboration), see the [Remote Access](https://github.com/remorses/playwriter#remote-access) docs.
+
+## Backward Compatibility
+
+The WebSocket protocol between extension and relay **must never introduce breaking changes**. Extensions are distributed via Chrome Web Store and updates propagate slowly. The relay server must support older extension versions indefinitely.
+
+New features should be opt-in and detected via version negotiation (extension sends `?v=` query param on connect).
+
+## Debugging
+
+All CDP traffic is logged to files for debugging:
+
+```bash
+playwriter logfile  # prints path to logs
+# typically: ~/.playwriter/relay-server.log
+#            ~/.playwriter/cdp.jsonl
+```
+
+**Relay server log:** Human-readable logs from extension, MCP, and WebSocket server.
+
+**CDP JSONL log:** One JSON object per line with CDP commands/responses/events. Use `jq` to analyze:
+
+```bash
+# Count CDP traffic by direction and method
+jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
+```
+
+## Related
+
+- [Sessions](/concepts/sessions) - Session isolation and state persistence
+- [State Management](/concepts/state-management) - How relay state is managed
+- [Accessibility Snapshots](/concepts/accessibility-snapshots) - How element refs work

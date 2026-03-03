@@ -1,0 +1,200 @@
+---
+title: Sessions
+description: Learn about session isolation, state persistence, and multi-agent workflows in Playwriter
+---
+
+Playwriter sessions provide **isolated sandboxes** for automating the browser. Each session has its own `state` object that persists between `execute()` calls, enabling stateful workflows without interference from other agents.
+
+## What is a Session?
+
+A session is an isolated execution environment with:
+
+- **Persistent state:** `state` object that survives across multiple `execute()` calls
+- **Shared browser context:** All sessions see the same `context.pages()` (browser tabs)
+- **Independent execution:** Code runs in a separate VM sandbox per session
+
+## Why Use Sessions?
+
+<Note>
+**Multi-agent isolation:** When multiple AI agents automate the browser simultaneously, sessions prevent them from overwriting each other's state.
+</Note>
+
+**Example without sessions:**
+
+```javascript
+// Agent A stores data
+state.userData = { name: 'Alice' }
+
+// Agent B overwrites it
+state.userData = { name: 'Bob' }  // Agent A's data is lost!
+```
+
+**Example with sessions:**
+
+```bash
+# Agent A gets session 1
+playwriter session new  # outputs: 1
+playwriter -s 1 -e 'state.userData = { name: "Alice" }'
+
+# Agent B gets session 2
+playwriter session new  # outputs: 2
+playwriter -s 2 -e 'state.userData = { name: "Bob" }'
+
+# Both agents' data is isolated and safe
+```
+
+## Session Management
+
+### Create a New Session
+
+```bash
+playwriter session new
+# outputs: 1
+```
+
+Always store the session ID and pass it with `-s` to all subsequent commands.
+
+### List All Sessions
+
+```bash
+playwriter session list
+# ID  State Keys
+# --------------
+# 1   myPage, userData
+# 2   apiData
+# 3   -
+```
+
+Shows all active sessions and the keys stored in their `state` objects.
+
+### Reset a Session
+
+```bash
+playwriter session reset <id>
+```
+
+Use this to recover from stale connections or broken state. Resets the browser connection but keeps the session ID active.
+
+## State Persistence
+
+**Source:** `playwriter/src/skill.md` (context variables section)
+
+The `state` object is **session-isolated** but persists between `execute()` calls within the same session:
+
+```javascript
+// First execute call - create and store page
+playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://example.com")'
+
+// Second execute call - state.page still exists
+playwriter -s 1 -e 'await state.page.click("button")'
+
+// Third execute call - retrieve stored data
+playwriter -s 1 -e 'console.log(state.page.url())'
+```
+
+**What can be stored in state:**
+
+- Playwright `Page` and `Frame` objects
+- Extracted data (arrays, objects, strings)
+- Event listeners (but clean them up with `state.page.removeAllListeners()` when done)
+- CDP sessions (`state.cdp = await getCDPSession({ page: state.page })`)
+
+**What cannot be stored in state:**
+
+- Browser-side functions (use `page.evaluate()` on each call instead)
+- Element handles (they become stale - use locators or re-query on each call)
+
+## Pages are Shared, State is Not
+
+<Tip>
+**Key principle:** Sessions have **isolated state** but **shared browser tabs**.
+</Tip>
+
+All sessions see the same `context.pages()` array (all browser tabs with Playwriter enabled). If another agent navigates or closes a page you're using, you'll be affected.
+
+**Best practice:** Create your own page and store it in state:
+
+```javascript
+// Get or create your own page
+state.page = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage()
+await state.page.goto('https://example.com')
+
+// Use state.page for all operations (not the default page variable)
+await state.page.click('button')
+```
+
+This isolates your workflow from other agents who might be using different tabs.
+
+## Multi-Agent Workflows
+
+**Scenario:** Two agents automate different tasks on the same browser simultaneously.
+
+**Agent A (session 1):** Scraping product data from e-commerce site
+
+```bash
+playwriter session new  # outputs: 1
+playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://shop.example.com")'
+playwriter -s 1 -e 'state.products = await state.page.$$eval(".product", els => els.map(e => e.textContent))'
+playwriter -s 1 -e 'console.log(state.products)'
+```
+
+**Agent B (session 2):** Testing login flow on different site
+
+```bash
+playwriter session new  # outputs: 2
+playwriter -s 2 -e 'state.page = await context.newPage(); await state.page.goto("https://app.example.com/login")'
+playwriter -s 2 -e 'await state.page.fill("[name=email]", "test@example.com")'
+playwriter -s 2 -e 'await state.page.click("button[type=submit]")'
+```
+
+Both agents operate independently without interfering with each other's state or pages.
+
+## Session State Implementation
+
+**Source:** `playwriter/src/relay-state.ts`
+
+Sessions are managed by the relay server using a Zustand store:
+
+```typescript
+export type RelayState = {
+  extensions: Map<string, ExtensionEntry>
+  playwrightClients: Map<string, PlaywrightClient>
+}
+
+export type PlaywrightClient = {
+  id: string
+  extensionId: string | null
+  ws: WSContext
+}
+```
+
+Each MCP/CLI execution creates a Playwright client that connects to the relay. The session ID determines which client owns which `state` object in the execution sandbox.
+
+## Session Lifecycle
+
+1. **Create:** `playwriter session new` assigns a unique ID
+2. **Execute:** Multiple `playwriter -s <id> -e '...'` calls persist state
+3. **Reset:** `playwriter session reset <id>` clears connection but keeps session ID
+4. **Implicit cleanup:** Sessions expire when the relay server restarts (state is lost)
+
+<Note>
+Sessions do NOT persist across relay server restarts. If you restart the server, all session state is lost and you must create new sessions.
+</Note>
+
+## When to Use Sessions
+
+**Use sessions when:**
+
+- Multiple agents automate the browser simultaneously
+- You need to persist data between multiple automation steps
+- You want to isolate page navigation from other agents
+
+**Don't need sessions when:**
+
+- You're running a single one-off command (`playwriter -e 'await page.goto(...)'` works fine)
+- You're controlling a single tab that no other agent touches
+
+## Related
+
+- [Architecture](/concepts/architecture) - How relay server manages sessions
+- [State Management](/concepts/state-management) - Relay state structure

@@ -1,0 +1,246 @@
+---
+title: snapshot()
+description: Get accessibility snapshot of page with interactive elements and locators
+---
+
+Get an accessibility snapshot with search, diff, and ref-to-locator mapping.
+
+## Function Signature
+
+```ts
+async function snapshot(options: {
+  page?: Page
+  frame?: Frame | FrameLocator
+  locator?: Locator
+  search?: string | RegExp
+  showDiffSinceLastCall?: boolean
+  format?: 'raw'
+  interactiveOnly?: boolean
+}): Promise<string>
+```
+
+## Parameters
+
+### page
+
+**Type:** `Page` (optional)
+
+**Default:** Current default page
+
+Target page to snapshot. If not provided, uses the default page from context.
+
+### frame
+
+**Type:** `Frame | FrameLocator` (optional)
+
+Optional frame to scope the snapshot. Use for iframe content:
+
+```js
+// Using Frame from page.frames()
+const frames = state.page.frames()
+const targetFrame = frames.find(f => f.url().includes('example.com'))
+await snapshot({ page: state.page, frame: targetFrame })
+
+// Using FrameLocator from locator.contentFrame()
+const frameLocator = await state.page.locator('iframe').contentFrame()
+await snapshot({ frame: frameLocator })
+```
+
+### locator
+
+**Type:** `Locator` (optional)
+
+Scope snapshot to a specific element subtree. Dramatically reduces output size when you only care about one section:
+
+```js
+// Full page snapshot: ~150 lines
+await snapshot({ page: state.page })
+
+// Scoped to main: ~20 lines
+await snapshot({ locator: state.page.locator('main') })
+
+// Scope to dialog, form, or section
+await snapshot({ locator: state.page.locator('[role="dialog"]') })
+await snapshot({ locator: state.page.locator('form#checkout') })
+```
+
+### search
+
+**Type:** `string | RegExp` (optional)
+
+Filter results to first 10 matching lines with 5 lines of context:
+
+```js
+// Search for text
+await snapshot({ page: state.page, search: 'submit' })
+
+// Search with regex (case-insensitive)
+await snapshot({ page: state.page, search: /button|link/i })
+
+// Complex patterns
+await snapshot({ page: state.page, search: /error|warning|fail/i })
+```
+
+When `search` is provided, `showDiffSinceLastCall` defaults to `false` so search filters the full content.
+
+### showDiffSinceLastCall
+
+**Type:** `boolean` (optional)
+
+**Default:** `true` (unless `search` is provided, then `false`)
+
+Return diff since last snapshot call. First call returns full snapshot, subsequent calls return only changes:
+
+```js
+// First call: full snapshot
+const snap1 = await snapshot({ page: state.page })
+// Returns complete tree
+
+// Click something
+await state.page.click('button')
+
+// Second call: diff only
+const snap2 = await snapshot({ page: state.page })
+// Returns only what changed
+
+// Force full snapshot
+const snap3 = await snapshot({ page: state.page, showDiffSinceLastCall: false })
+// Returns complete tree again
+```
+
+If nothing changed, returns: `"No changes since last snapshot. Use showDiffSinceLastCall: false to see full content."`
+
+To combine search with diff, explicitly enable both:
+
+```js
+await snapshot({ 
+  page: state.page, 
+  search: /button/, 
+  showDiffSinceLastCall: true 
+})
+```
+
+### format
+
+**Type:** `'raw'` (optional)
+
+**Default:** `'raw'`
+
+Snapshot format. Currently only `'raw'` is supported.
+
+### interactiveOnly
+
+**Type:** `boolean` (optional)
+
+**Default:** `false`
+
+Only include interactive elements in the snapshot. When `true`, filters to buttons, links, inputs, and other interactive roles.
+
+## Return Value
+
+**Type:** `Promise<string>`
+
+Returns a text-based accessibility tree with locators:
+
+```
+- banner:
+  - link "Home" [id="nav-home"]
+  - navigation:
+    - link "Docs" [data-testid="docs-link"]
+    - link "Blog" role=link[name="Blog"]
+- main:
+  - heading "Welcome" role=heading[name="Welcome"]
+  - button "Get Started" [id="cta-btn"]
+```
+
+Each interactive line ends with a Playwright locator you can use directly:
+
+```js
+await state.page.locator('[id="nav-home"]').click()
+await state.page.locator('[data-testid="docs-link"]').click()
+await state.page.locator('role=link[name="Blog"]').click()
+```
+
+If multiple elements share the same locator, a `>> nth=N` suffix is added (0-based):
+
+```
+- list:
+  - listitem:
+    - button "Delete" role=button[name="Delete"] >> nth=0
+  - listitem:
+    - button "Delete" role=button[name="Delete"] >> nth=1
+```
+
+## Examples
+
+### Basic usage
+
+```js
+// Full page snapshot
+const snap = await snapshot({ page: state.page })
+console.log(snap)
+
+// Search for specific elements
+const buttons = await snapshot({ 
+  page: state.page, 
+  search: /button|submit/i 
+})
+```
+
+### With locators
+
+```js
+// Scope to main content
+const content = await snapshot({ 
+  locator: state.page.locator('main') 
+})
+
+// Scope to dialog
+const dialog = await snapshot({ 
+  locator: state.page.locator('[role="dialog"]') 
+})
+```
+
+### Tracking changes
+
+```js
+// Initial state
+await snapshot({ page: state.page })
+
+// Make changes
+await state.page.click('button')
+
+// See what changed
+const diff = await snapshot({ page: state.page })
+console.log(diff) // Only shows differences
+```
+
+### Using with frames
+
+```js
+// Get iframe snapshot
+const frame = await state.page.locator('iframe').contentFrame()
+const frameSnap = await snapshot({ frame })
+
+// Or using frame from page.frames()
+const frames = state.page.frames()
+const targetFrame = frames.find(f => f.url().includes('example.com'))
+const snap = await snapshot({ page: state.page, frame: targetFrame })
+```
+
+## Notes
+
+- **Always use snapshot locators directly** — never invent selectors. The snapshot output IS the selector.
+- Snapshots are text-based, fast, and cheap. Use them as your primary debugging tool.
+- Only use screenshots for visual/CSS issues. For text content, snapshot is much faster.
+- **Beware CSS text-transform**: snapshots show visual text (`heading "NODE.JS"`) but DOM may be `"Node.js"`. Use case-insensitive regex: `getByRole('heading', { name: /node\.js/i })`
+
+## Backward Compatibility
+
+`accessibilitySnapshot` is still available as an alias for backward compatibility:
+
+```js
+// Both work identically
+await snapshot({ page: state.page })
+await accessibilitySnapshot({ page: state.page })
+```

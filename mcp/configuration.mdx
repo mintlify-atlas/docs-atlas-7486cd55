@@ -1,0 +1,363 @@
+---
+title: MCP Configuration
+description: Configure the Playwriter MCP server with environment variables, authentication tokens, and remote hosts
+---
+
+Configure the Playwriter MCP server for different environments using environment variables in your MCP client settings.
+
+## Environment Variables
+
+### PLAYWRITER_AUTO_ENABLE
+
+Automatically create a tab when Playwright connects, without requiring a manual extension click.
+
+<Note>
+The CLI enables this by default. This is only needed for MCP server usage.
+</Note>
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_AUTO_ENABLE": "1"
+      }
+    }
+  }
+}
+```
+
+The auto-created tab starts at `about:blank`. The AI can navigate it to any URL.
+
+### PLAYWRITER_HOST
+
+Connect to a remote relay server instead of starting a local one.
+
+**Values:**
+- Remote tunnel URL: `https://my-machine-tunnel.traforo.dev`
+- LAN IP address: `192.168.1.10`
+- Docker host: `host.docker.internal`
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_HOST": "https://my-machine-tunnel.traforo.dev"
+      }
+    }
+  }
+}
+```
+
+See [Remote Access](/mcp/remote-access) for full setup instructions.
+
+### PLAYWRITER_TOKEN
+
+Authentication token for remote relay servers. Required when connecting to a relay server started with `playwriter serve --token <secret>`.
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_HOST": "https://my-machine-tunnel.traforo.dev",
+        "PLAYWRITER_TOKEN": "MY_SECRET_TOKEN"
+      }
+    }
+  }
+}
+```
+
+<Warning>
+Never commit tokens to version control. Use environment variables or secure secret management.
+</Warning>
+
+### PLAYWRITER_PORT
+
+Override the default relay server port (19988).
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_PORT": "8080"
+      }
+    }
+  }
+}
+```
+
+<Note>
+Not needed when using traforo tunnels, which handle port mapping automatically.
+</Note>
+
+## Command-Line Arguments
+
+Alternatively, pass configuration as command-line arguments:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "playwriter@latest",
+        "--host",
+        "host.docker.internal",
+        "--token",
+        "<secret>"
+      ]
+    }
+  }
+}
+```
+
+**Available arguments:**
+- `--host <url>` - Remote relay server URL or IP
+- `--token <secret>` - Authentication token
+
+## Docker & Devcontainer Setup
+
+Run the MCP server inside a container while controlling Chrome on the host machine.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────┐
+│  HOST MACHINE                           │
+│                                         │
+│  Chrome + Extension ◄── playwriter serve│
+│                         :19988          │
+└──────────────────────▲──────────────────┘
+                       │
+           host.docker.internal:19988
+                       │
+┌──────────────────────┴──────────────────┐
+│  DOCKER CONTAINER                       │
+│                                         │
+│  MCP Server (PLAYWRITER_HOST set)       │
+└─────────────────────────────────────────┘
+```
+
+### Step 1: Host Machine
+
+Start the relay server on the host (where Chrome is running):
+
+```bash
+playwriter serve --host localhost
+```
+
+Using `--host localhost` binds to `127.0.0.1` so no token is needed. Docker containers reach it through `host.docker.internal`.
+
+### Step 2: Container Configuration
+
+Configure the MCP server to connect to the host:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_HOST": "host.docker.internal"
+      }
+    }
+  }
+}
+```
+
+### Platform Support
+
+| Platform | Works out of the box? | Notes |
+|----------|----------------------|-------|
+| **macOS** (Docker Desktop) | Yes | Supported since Docker Desktop 18.03 |
+| **Windows** (Docker Desktop) | Yes | Supported since Docker Desktop 18.03 |
+| **Linux** (Docker Engine) | No | Requires `--add-host` (see below) |
+
+#### Linux Setup
+
+On Linux, `host.docker.internal` must be added explicitly:
+
+```bash
+docker run --add-host=host.docker.internal:host-gateway \
+  -e PLAYWRITER_HOST=host.docker.internal myimage
+```
+
+Or in Docker Compose:
+
+```yaml
+services:
+  app:
+    build: .
+    environment:
+      - PLAYWRITER_HOST=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+### Devcontainer Configuration
+
+In `.devcontainer/devcontainer.json`:
+
+```json
+{
+  "name": "My Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "containerEnv": {
+    "PLAYWRITER_HOST": "host.docker.internal"
+  },
+  "runArgs": [
+    "--add-host=host.docker.internal:host-gateway"
+  ]
+}
+```
+
+<Warning>
+**Common mistake:** Running `playwriter serve` inside the container. This won't work because the Chrome extension can only connect to the relay via localhost, and localhost inside Docker is isolated from the host.
+</Warning>
+
+## Configuration by Environment
+
+### Local Development (Default)
+
+No configuration needed. The MCP server starts a local relay automatically:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"]
+    }
+  }
+}
+```
+
+### Docker/Devcontainer
+
+Connect to the host machine's relay server:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_HOST": "host.docker.internal"
+      }
+    }
+  }
+}
+```
+
+### Remote Machine (Internet)
+
+Connect through a traforo tunnel:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_HOST": "https://my-machine-tunnel.traforo.dev",
+        "PLAYWRITER_TOKEN": "MY_SECRET_TOKEN"
+      }
+    }
+  }
+}
+```
+
+### LAN (Same Network)
+
+Connect directly via IP address:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_HOST": "192.168.1.10",
+        "PLAYWRITER_TOKEN": "MY_SECRET_TOKEN"
+      }
+    }
+  }
+}
+```
+
+## Security Best Practices
+
+<Steps>
+  <Step title="Use strong tokens">
+    Generate random tokens with `openssl rand -hex 16`
+  </Step>
+  
+  <Step title="Store tokens securely">
+    Never commit tokens to version control. Use environment variables or secret managers.
+  </Step>
+  
+  <Step title="Bind to localhost when possible">
+    Use `playwriter serve --host localhost` for local-only access (no token required)
+  </Step>
+  
+  <Step title="Use tokens for network access">
+    When binding to `0.0.0.0` or exposing to network, always use `--token`
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Cannot connect to remote relay server
+
+Error: `Cannot connect to remote relay server at <host>`
+
+**Solution:** Make sure `playwriter serve` is running on the host machine:
+
+```bash
+# On host machine
+playwriter serve --token MY_SECRET_TOKEN
+```
+
+### Connection refused from Docker
+
+Error: `ECONNREFUSED` when connecting to `host.docker.internal`
+
+**Solutions:**
+1. Verify relay is running on host: `playwriter serve --host localhost`
+2. On Linux, add `--add-host=host.docker.internal:host-gateway`
+3. Check firewall rules aren't blocking port 19988
+
+### Token authentication failed
+
+Error: `401 Unauthorized`
+
+**Solution:** Ensure `PLAYWRITER_TOKEN` matches the token used in `playwriter serve --token <secret>`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Remote Access" icon="cloud" href="/mcp/remote-access">
+    Control Chrome on remote machines over the internet
+  </Card>
+  <Card title="CLI Usage" icon="terminal" href="/cli/overview">
+    Use the recommended CLI workflow instead of MCP
+  </Card>
+</CardGroup>

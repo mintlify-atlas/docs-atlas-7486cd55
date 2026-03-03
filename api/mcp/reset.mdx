@@ -1,0 +1,160 @@
+---
+title: reset
+description: Reset the CDP connection and browser context
+---
+
+Recreates the CDP connection and resets the browser/page/context. Use this when the MCP stops responding, you get connection errors, if there are no pages in context, assertion failures, page closed, or other issues.
+
+## Parameters
+
+This tool takes no parameters.
+
+```json
+{}
+```
+
+## Response
+
+<ResponseField name="content" type="array">
+  Array containing a single text content item with reset status.
+  
+  <Expandable title="Content items">
+    <ResponseField name="type" type="string">
+      Always `"text"`
+    </ResponseField>
+    
+    <ResponseField name="text" type="string">
+      Status message indicating successful reset with page count and current URL
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="isError" type="boolean">
+  Whether the reset failed (only present on error)
+</ResponseField>
+
+## Usage Examples
+
+### Basic reset
+
+```javascript
+{}
+```
+
+### Successful response
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Connection reset successfully. 2 page(s) available. Current page URL: https://example.com"
+    }
+  ]
+}
+```
+
+### Error response
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Failed to reset connection: Cannot connect to relay server"
+    }
+  ],
+  "isError": true
+}
+```
+
+## When to Use Reset
+
+Call `reset` in the following situations:
+
+### Connection errors
+
+When you receive errors indicating lost connection:
+- "Target closed"
+- "Session closed"
+- "Protocol error"
+- "Connection lost"
+
+### Page/context issues
+
+When page or context operations fail:
+- "No page available"
+- "Browser has been closed"
+- "Execution context was destroyed"
+
+### MCP unresponsive
+
+When the MCP server stops responding or times out repeatedly.
+
+### After browser restart
+
+If the user manually restarts Chrome or the browser crashes.
+
+## Important Notes
+
+<Warning>
+  Reset clears all custom properties from the global scope and empties the `state` object.
+</Warning>
+
+After calling reset:
+
+- `page` - Updated to current page
+- `context` - Updated to new browser context
+- `state` - Emptied (all keys removed)
+- `console` - Available
+- Utility functions - Available
+- Custom global variables - **Removed**
+
+## Do NOT Reset For
+
+Avoid calling reset for these situations:
+
+- JavaScript errors in your code
+- Element not found errors
+- Timeout errors from slow page loads (increase timeout instead)
+- Navigation errors (404, network failures)
+- Assertion failures in tests
+- Logic errors in execute code
+
+Only reset for actual connection/internal Playwright errors.
+
+## Known Issues
+
+### Chrome about:blank bug
+
+If after reset, Playwright always returns all pages as `about:blank` URLs and `evaluate()` does not work:
+
+<Warning>
+  This is a known Chrome bug. Ask the user to restart Chrome completely.
+</Warning>
+
+The reset tool cannot fix this issue - a full Chrome restart is required.
+
+## Workflow Example
+
+```javascript
+// Try to execute code
+{
+  "code": "await page.click('button')"
+}
+// Response: Error - "Target closed"
+
+// Reset connection
+{}
+// Response: "Connection reset successfully. 1 page(s) available. Current page URL: https://example.com"
+
+// Continue working
+{
+  "code": "await page.click('button')"
+}
+// Success
+```
+
+## Auto-recovery
+
+The execute tool automatically checks the relay server on every call and attempts to auto-recover from crashes. However, if you encounter persistent connection issues, explicitly calling reset is recommended.

@@ -1,0 +1,342 @@
+---
+title: Working with iframes
+description: How to interact with iframe content using Playwriter's frame locators and snapshots
+---
+
+## Overview
+
+iframes present a unique challenge in browser automation because their content is isolated from the parent page. Playwriter provides several methods to work with iframes effectively.
+
+## Finding iframes
+
+### List all frames
+
+You can enumerate all frames on a page:
+
+```javascript
+const frames = state.page.frames()
+
+for (const frame of frames) {
+  console.log('Frame URL:', frame.url())
+  console.log('Frame name:', frame.name())
+}
+```
+
+### Find specific iframe
+
+Search for an iframe by URL pattern:
+
+```javascript
+const targetFrame = state.page.frames().find((f) => 
+  f.url().includes('plugins.framercdn.com')
+)
+
+if (targetFrame) {
+  console.log('Found iframe:', targetFrame.url())
+} else {
+  console.log('Iframe not found')
+}
+```
+
+### Get iframe by locator
+
+You can get a frame reference from an iframe element:
+
+```javascript
+// Get the frame from an iframe element
+const frameElement = state.page.locator('iframe[title="Plugin Frame"]')
+const frame = await frameElement.contentFrame()
+
+if (frame) {
+  console.log('Frame loaded:', frame.url())
+}
+```
+
+## Taking snapshots of iframes
+
+Use the `frame` parameter to snapshot iframe content:
+
+```javascript
+// Find the iframe
+const frame = state.page.frames().find((f) => 
+  f.url().includes('example.com/widget')
+)
+
+// Take snapshot of iframe content
+if (frame) {
+  await snapshot({ page: state.page, frame }).then(console.log)
+}
+```
+
+<Note>
+The `page` parameter is still required even when taking an iframe snapshot — it's used for the parent page context.
+</Note>
+
+## Interacting with iframe content
+
+### Click elements in iframe
+
+```javascript
+// Get frame reference
+const frame = state.page.frames().find((f) => f.url().includes('widget.example.com'))
+
+if (frame) {
+  // Use frame's locator methods
+  await frame.click('button.submit')
+  await frame.fill('input[name="email"]', 'user@example.com')
+}
+```
+
+### Using aria-ref locators in iframes
+
+When you take a snapshot of an iframe, the aria-ref locators work within that frame:
+
+```javascript
+const frame = state.page.frames().find((f) => f.url().includes('widget.example.com'))
+
+if (frame) {
+  // Get snapshot with aria-ref labels
+  await snapshot({ page: state.page, frame }).then(console.log)
+  
+  // Use the aria-ref from the snapshot
+  await frame.locator('aria-ref=e5').click()
+}
+```
+
+## Complete iframe workflow
+
+Here's a complete example of working with an iframe:
+
+<Steps>
+  <Step title="Navigate to page with iframe">
+    ```javascript
+    state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+    await state.page.goto('https://example.com/page-with-iframe', { waitUntil: 'domcontentloaded' })
+    ```
+  </Step>
+  
+  <Step title="Wait for iframe to load">
+    ```javascript
+    // Wait for iframe element to appear
+    await state.page.waitForSelector('iframe', { timeout: 10000 })
+    await state.page.waitForTimeout(2000) // Wait for iframe content to load
+    ```
+  </Step>
+  
+  <Step title="Find and verify iframe">
+    ```javascript
+    // List all frames to find the right one
+    const frames = state.page.frames()
+    console.log('Available frames:')
+    for (const f of frames) {
+      console.log(`  ${f.url()} (name: ${f.name()})`)
+    }
+    
+    // Find target frame
+    const targetFrame = frames.find((f) => f.url().includes('widget.example.com'))
+    
+    if (!targetFrame) {
+      throw new Error('Target iframe not found')
+    }
+    ```
+  </Step>
+  
+  <Step title="Take iframe snapshot">
+    ```javascript
+    // Get snapshot of iframe content
+    const iframeSnapshot = await snapshot({ page: state.page, frame: targetFrame })
+    console.log('Iframe content:', iframeSnapshot)
+    ```
+  </Step>
+  
+  <Step title="Interact with iframe">
+    ```javascript
+    // Use aria-ref or regular selectors
+    await targetFrame.locator('aria-ref=e5').click()
+    // Or use regular selectors
+    await targetFrame.fill('input[name="query"]', 'test')
+    await targetFrame.click('button[type="submit"]')
+    ```
+  </Step>
+  
+  <Step title="Verify result">
+    ```javascript
+    // Take another snapshot to verify action
+    await state.page.waitForTimeout(1000)
+    await snapshot({ page: state.page, frame: targetFrame }).then(console.log)
+    ```
+  </Step>
+</Steps>
+
+## Cross-origin iframes
+
+Some iframes may have cross-origin restrictions that prevent automation. In these cases:
+
+### Out-of-process frames
+
+Modern browsers use out-of-process iframes (OOPIF) for security. Playwriter handles these automatically:
+
+```javascript
+// Works with OOPIFs automatically
+const frames = state.page.frames()
+console.log(`Found ${frames.length} frames (including OOPIFs)`)
+
+for (const frame of frames) {
+  try {
+    const url = frame.url()
+    console.log('Frame:', url)
+  } catch (error) {
+    console.log('Cannot access cross-origin frame')
+  }
+}
+```
+
+### Nested iframes
+
+For deeply nested iframes, you need to navigate the frame tree:
+
+```javascript
+// Find parent iframe
+const parentFrame = state.page.frames().find((f) => f.url().includes('parent.example.com'))
+
+if (parentFrame) {
+  // Get child frames of parent
+  const childFrames = parentFrame.childFrames()
+  
+  // Find nested iframe
+  const nestedFrame = childFrames.find((f) => f.url().includes('nested.example.com'))
+  
+  if (nestedFrame) {
+    await snapshot({ page: state.page, frame: nestedFrame }).then(console.log)
+  }
+}
+```
+
+## Common iframe patterns
+
+### Waiting for iframe to load
+
+```javascript
+// Wait for iframe element
+await state.page.waitForSelector('iframe#myframe')
+
+// Get frame and wait for it to load
+const frameElement = state.page.locator('iframe#myframe')
+const frame = await frameElement.contentFrame()
+
+// Wait for frame navigation to complete
+if (frame) {
+  await frame.waitForLoadState('domcontentloaded')
+}
+```
+
+### Switching between main page and iframe
+
+```javascript
+// Interact with main page
+await state.page.click('button.open-modal')
+
+// Find iframe that appeared
+const modalFrame = state.page.frames().find((f) => f.url().includes('modal.example.com'))
+
+// Interact with iframe
+if (modalFrame) {
+  await modalFrame.fill('input[name="email"]', 'user@example.com')
+  await modalFrame.click('button.submit')
+}
+
+// Back to main page
+await state.page.waitForSelector('.success-message')
+await snapshot({ page: state.page })
+```
+
+### Dynamic iframes
+
+Some iframes are created dynamically (e.g., after clicking a button):
+
+```javascript
+// Click button that creates iframe
+await state.page.click('button.load-widget')
+
+// Wait for iframe to appear
+await state.page.waitForSelector('iframe.widget-frame', { timeout: 10000 })
+await state.page.waitForTimeout(2000) // Wait for content to load
+
+// Now find and interact with it
+const frames = state.page.frames()
+const widgetFrame = frames.find((f) => f.url().includes('widget'))
+
+if (widgetFrame) {
+  await snapshot({ page: state.page, frame: widgetFrame }).then(console.log)
+}
+```
+
+## Troubleshooting
+
+### Iframe not found
+
+```javascript
+// List all frames to debug
+const frames = state.page.frames()
+console.log(`Total frames: ${frames.length}`)
+
+for (let i = 0; i < frames.length; i++) {
+  const frame = frames[i]
+  console.log(`Frame ${i}:`)
+  console.log(`  URL: ${frame.url()}`)
+  console.log(`  Name: ${frame.name()}`)
+  console.log(`  Parent: ${frame.parentFrame() ? 'yes' : 'no'}`)
+}
+```
+
+### Iframe content is blank
+
+```javascript
+// Check if iframe loaded
+const frame = state.page.frames().find((f) => f.url().includes('widget.example.com'))
+
+if (frame) {
+  console.log('Frame URL:', frame.url())
+  
+  // Wait longer for content
+  await state.page.waitForTimeout(3000)
+  
+  // Try to get title
+  try {
+    const title = await frame.title()
+    console.log('Frame title:', title)
+  } catch (error) {
+    console.log('Cannot access frame content')
+  }
+  
+  // Take snapshot
+  await snapshot({ page: state.page, frame }).then(console.log)
+}
+```
+
+### Cross-origin errors
+
+```javascript
+// Some frames cannot be accessed due to CORS
+const frame = state.page.frames().find((f) => f.url().includes('third-party.com'))
+
+if (frame) {
+  try {
+    await snapshot({ page: state.page, frame })
+  } catch (error) {
+    console.log('Cross-origin frame - cannot access content')
+    console.log('Frame URL:', frame.url())
+    // Cannot interact with this frame
+  }
+}
+```
+
+## Best practices
+
+1. **Always wait for iframe to load** before trying to interact with it
+2. **List all frames first** when debugging to see what's available
+3. **Use the frame parameter** in snapshot() to get iframe-specific content
+4. **Handle frame not found** gracefully with error checking
+5. **Allow extra time** for dynamic iframe content to load
+6. **Use frame.waitForLoadState()** instead of arbitrary timeouts when possible
+7. **Verify frame content** with snapshot before interacting

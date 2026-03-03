@@ -1,0 +1,183 @@
+---
+title: Installation
+description: Install the Playwriter Chrome extension, CLI, and optional skill for AI agents.
+---
+
+Playwriter consists of three components: the Chrome extension (required), the CLI tool (recommended), and an optional skill for AI agents.
+
+## Chrome extension
+
+<Steps>
+  <Step title="Install from Chrome Web Store">
+    [Install the Playwriter extension](https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe) from the Chrome Web Store.
+  </Step>
+  
+  <Step title="Enable on a tab">
+    Click the extension icon on any tab. The icon turns **green** when the tab is connected and ready for automation.
+
+    <Tip>
+      Only tabs where you click the extension icon can be automated. This is an explicit security feature.
+    </Tip>
+  </Step>
+  
+  <Step title="Verify connection">
+    The extension automatically connects to the WebSocket relay server on `localhost:19988`. If Chrome is not running, start it first:
+
+    <CodeGroup>
+      ```bash macOS
+      open -a "Google Chrome" --args --profile-directory=Default
+      ```
+
+      ```bash Linux
+      google-chrome --profile-directory=Default &
+      ```
+
+      ```bash Windows (cmd)
+      start chrome.exe --profile-directory=Default
+      ```
+
+      ```bash Windows (PowerShell)
+      Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
+      ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## CLI tool
+
+The CLI is the recommended way to use Playwriter. It provides session management and code execution.
+
+<Steps>
+  <Step title="Install globally">
+    <CodeGroup>
+      ```bash npm
+      npm install -g playwriter
+      ```
+
+      ```bash pnpm
+      pnpm add -g playwriter
+      ```
+
+      ```bash yarn
+      yarn global add playwriter
+      ```
+    </CodeGroup>
+
+    Or use without installing:
+
+    <CodeGroup>
+      ```bash npx
+      npx playwriter@latest session new
+      ```
+
+      ```bash bunx
+      bunx playwriter@latest session new
+      ```
+    </CodeGroup>
+
+    <Note>
+      When using npx or bunx, always use `@latest` for the first session command to ensure you're using the latest version.
+    </Note>
+  </Step>
+  
+  <Step title="Verify installation">
+    Create a test session and run a simple command:
+
+    ```bash
+    playwriter session new
+    # outputs: 1
+
+    playwriter -s 1 -e 'await page.goto("https://example.com")'
+    playwriter -s 1 -e 'console.log(await page.title())'
+    ```
+
+    You should see the page title printed to the console.
+  </Step>
+  
+  <Step title="Check logs (optional)">
+    If you encounter issues, view the relay server logs:
+
+    ```bash
+    playwriter logfile
+    # prints log file path, typically: ~/.playwriter/relay-server.log
+    ```
+
+    The relay log contains extension, MCP, and WebSocket server logs. A separate CDP JSONL log is created alongside it.
+  </Step>
+</Steps>
+
+## Skill for AI agents
+
+Install the Playwriter skill so AI agents know how to use the tool effectively.
+
+<Steps>
+  <Step title="Install the skill">
+    ```bash
+    npx -y skills add remorses/playwriter
+    ```
+
+    This adds agent-specific instructions and best practices to your AI agent's context.
+  </Step>
+</Steps>
+
+## MCP setup (alternative)
+
+If you prefer to use Playwriter as an MCP server instead of the CLI, see the [MCP setup guide](/mcp/setup).
+
+<Warning>
+  The CLI with the skill (recommended above) is the preferred approach. Direct MCP configuration is for advanced use cases.
+</Warning>
+
+Add to your MCP client settings:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"]
+    }
+  }
+}
+```
+
+Or auto-configure:
+
+```bash
+npx -y @playwriter/install-mcp playwriter@latest
+```
+
+## Optional: Enable automatic tab capture
+
+For screen recording without manual extension clicks, add Chrome flags:
+
+<CodeGroup>
+  ```bash macOS
+  open -a "Google Chrome" --args --profile-directory=Default \
+    --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe \
+    --auto-accept-this-tab-capture
+  ```
+
+  ```bash Linux
+  google-chrome --profile-directory=Default \
+    --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe \
+    --auto-accept-this-tab-capture &
+  ```
+
+  ```bash Windows
+  start chrome.exe --profile-directory=Default ^
+    --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe ^
+    --auto-accept-this-tab-capture
+  ```
+</CodeGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first automation
+  </Card>
+  <Card title="CLI usage" icon="terminal" href="/cli-usage">
+    Learn session management and code execution
+  </Card>
+</CardGroup>

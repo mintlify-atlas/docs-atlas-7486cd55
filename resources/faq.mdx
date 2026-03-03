@@ -1,0 +1,461 @@
+---
+title: FAQ
+description: Frequently asked questions about Playwriter
+---
+
+## General Questions
+
+<AccordionGroup>
+  <Accordion title="When should I use Playwriter vs WebFetch?">
+    **Use Playwriter when:**
+    
+    - You need to interact with pages (click, type, scroll)
+    - The site requires login or authentication
+    - You're dealing with bot detection or CAPTCHAs
+    - You need to execute JavaScript on the page
+    - You want to use browser extensions (ad blockers, etc.)
+    - You need to handle complex navigation flows
+    
+    **Use WebFetch when:**
+    
+    - You only need to read static HTML content
+    - The page doesn't require authentication
+    - No JavaScript execution is needed
+    - You want minimal overhead and faster execution
+    - Bot detection isn't a concern
+    
+    WebFetch is lighter and faster for simple scraping. Playwriter is necessary for complex interactions and authenticated sessions.
+  </Accordion>
+
+  <Accordion title="Why does the extension icon stay gray?">
+    The gray icon means the extension cannot control that page. Common reasons:
+    
+    - **Restricted page**: Chrome doesn't allow extensions on `chrome://`, `chrome-extension://`, or Chrome Web Store pages
+    - **No tab loaded**: The tab is still loading or is `about:blank`
+    - **Extension not installed**: Make sure you installed from Chrome Web Store
+    
+    The icon should turn black (clickable) on normal web pages. Click it to turn it green (connected).
+  </Accordion>
+
+  <Accordion title="How do I know which tabs are being controlled?">
+    Look for these indicators:
+    
+    - **Green extension icon**: Tab is connected and can be automated
+    - **Chrome automation banner**: "Chrome is being controlled by automated test software"
+    - **Session list**: Run `playwriter session list` to see active sessions
+    
+    Only tabs with green icons can be controlled by Playwriter.
+  </Accordion>
+
+  <Accordion title="Can I use Playwriter with multiple Chrome profiles?">
+    Yes! Each Chrome profile runs independently:
+    
+    - Install the extension in each profile you want to automate
+    - Each profile gets its own relay server connection
+    - Sessions are isolated per profile
+    
+    You can even run multiple profiles simultaneously, though only one extension can connect to port 19988 at a time (the first one with active tabs keeps the connection).
+  </Accordion>
+
+  <Accordion title="Does Playwriter work on Windows/Mac/Linux?">
+    Yes, Playwriter is cross-platform:
+    
+    - **macOS**: Full support
+    - **Windows**: Full support (including WSL)
+    - **Linux**: Full support
+    
+    The CLI, MCP server, and extension work identically on all platforms.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Error: 'Chrome is not running or extension is not connected'">
+    This means the relay server can't communicate with the extension. Fix it by:
+    
+    1. **Open Chrome** with the Playwriter extension installed
+    2. **Click the extension icon** on at least one tab (turns green)
+    3. **Wait a few seconds** for the extension to connect to the relay
+    4. **Try your command again**
+    
+    If it still fails:
+    
+    - Check that Chrome is actually running
+    - Verify the extension is installed and enabled
+    - Check relay server logs: `playwriter logfile`
+    - Try restarting Chrome
+  </Accordion>
+
+  <Accordion title="Error: 'Session not found'">
+    You tried to execute code in a session that doesn't exist. Fix it by:
+    
+    ```bash
+    # Create a new session first
+    playwriter session new
+    # Output: 1
+    
+    # Then use that session ID
+    playwriter -s 1 -e 'await page.goto("https://example.com")'
+    ```
+    
+    List existing sessions with:
+    
+    ```bash
+    playwriter session list
+    ```
+  </Accordion>
+
+  <Accordion title="Error: 'All pages are about:blank'">
+    This is a Chrome bug in the `chrome.debugger` API. Fix it by:
+    
+    1. **Restart Chrome** completely (quit and reopen)
+    2. **Click the extension icon** on a tab to reconnect
+    3. **Try again**
+    
+    This usually happens after Chrome has been running for a long time.
+  </Accordion>
+
+  <Accordion title="Browser switches to light mode when I start automating">
+    This is a known Playwright issue ([#37627](https://github.com/microsoft/playwright/issues/37627)). When Playwright connects via CDP, it can trigger theme changes.
+    
+    **Workaround:**
+    
+    - Manually switch back to dark mode in Chrome settings
+    - Or set your OS to light mode so it matches
+    
+    This is a Playwright bug, not specific to Playwriter.
+  </Accordion>
+
+  <Accordion title="How do I debug issues with the relay server?">
+    Check the relay server logs:
+    
+    ```bash
+    # Show log file path
+    playwriter logfile
+    # Output: /Users/you/.playwriter/relay-server.log
+    
+    # View logs in real-time
+    tail -f ~/.playwriter/relay-server.log
+    ```
+    
+    The log file contains:
+    
+    - Extension connection events
+    - WebSocket messages
+    - CDP command traffic
+    - Error stack traces
+    
+    For CDP-specific debugging, also check the CDP JSONL log:
+    
+    ```bash
+    # View CDP traffic by method
+    jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
+    ```
+  </Accordion>
+
+  <Accordion title="Why does page.goto() fail with 'net::ERR_BLOCKED_BY_CLIENT'?">
+    This usually means an ad blocker or extension blocked the request. Common causes:
+    
+    - **Ad blocker**: Disable uBlock Origin or similar extensions for that site
+    - **Privacy extensions**: Disable Privacy Badger, Ghostery, etc.
+    - **Network blocker**: Check if your network is blocking the domain
+    
+    Try disabling extensions one by one to find the culprit.
+  </Accordion>
+</AccordionGroup>
+
+## Bot Detection & Captchas
+
+<AccordionGroup>
+  <Accordion title="How do I bypass bot detection?">
+    Playwriter helps by using your real browser, but sites can still detect automation:
+    
+    **During automation:**
+    
+    - Chrome shows an automation banner ("Chrome is being controlled...")
+    - Sites can detect `navigator.webdriver` and other signals
+    
+    **To bypass detection:**
+    
+    1. **Disconnect the extension** after navigating to the page
+    2. Click the green extension icon to turn it gray
+    3. The automation banner disappears
+    4. The site sees a normal browser session
+    
+    This works because Playwriter uses your real browser with your extensions, cookies, and browsing history.
+  </Accordion>
+
+  <Accordion title="Can Playwriter solve CAPTCHAs automatically?">
+    No. Playwriter cannot automatically solve CAPTCHAs, but you can:
+    
+    **Option 1: Manual solving**
+    
+    - Let the automation run until it hits a CAPTCHA
+    - Disconnect the extension (click green icon → gray)
+    - Manually solve the CAPTCHA in the browser
+    - Reconnect the extension (click gray icon → green)
+    - Continue automation
+    
+    **Option 2: Avoid triggering CAPTCHAs**
+    
+    - Use your logged-in browser (sites trust authenticated users)
+    - Add delays between actions to appear more human-like
+    - Avoid rapid-fire requests that trigger rate limits
+    
+    **Option 3: CAPTCHA solving services**
+    
+    - Use services like 2Captcha or Anti-Captcha
+    - Integrate their API in your automation code
+    - These services use human solvers or ML models
+  </Accordion>
+
+  <Accordion title="Does Playwriter hide the 'controlled by automation' banner?">
+    No, but you can remove it by disconnecting the extension:
+    
+    1. Click the **green extension icon** to disconnect (turns gray)
+    2. The automation banner disappears immediately
+    3. The page thinks it's a normal browsing session
+    
+    This is useful for bypassing bot detection on sites that check for automation indicators.
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Usage
+
+<AccordionGroup>
+  <Accordion title="How do I access iframes with Playwriter?">
+    Use Playwright's frame API:
+    
+    ```bash
+    # Get frame by URL
+    playwriter -s 1 -e 'state.frame = page.frame({ url: /example\.com/ })'
+    playwriter -s 1 -e 'await state.frame.click("button")'
+    
+    # Get frame by name
+    playwriter -s 1 -e 'state.frame = page.frame({ name: "myIframe" })'
+    
+    # List all frames
+    playwriter -s 1 -e 'console.log(page.frames().map(f => f.url()))'
+    ```
+    
+    Frames share the same CDP session, so you can interact with them directly.
+  </Accordion>
+
+  <Accordion title="Can I record video of my automation?">
+    Yes! Playwriter supports native tab capture recording:
+    
+    ```bash
+    playwriter -s 1 -e '
+      await recording.start({ page })
+      await page.goto("https://example.com")
+      await page.click("button")
+      const { path } = await recording.stop({ page })
+      console.log("Video saved to:", path)
+    '
+    ```
+    
+    This is **100x more efficient** than Playwright's video recording, which sends base64 images for every frame.
+  </Accordion>
+
+  <Accordion title="How do I set breakpoints in page JavaScript?">
+    Use the debugger API:
+    
+    ```bash
+    # Initialize debugger
+    playwriter -s 1 -e '
+      state.cdp = await getCDPSession({ page })
+      state.dbg = createDebugger({ cdp: state.cdp })
+      await state.dbg.enable()
+    '
+    
+    # List scripts
+    playwriter -s 1 -e '
+      state.scripts = await state.dbg.listScripts({ search: "app" })
+      console.log(state.scripts.map(s => s.url))
+    '
+    
+    # Set breakpoint
+    playwriter -s 1 -e '
+      await state.dbg.setBreakpoint({ 
+        file: state.scripts[0].url, 
+        line: 42 
+      })
+    '
+    ```
+    
+    See [Debugger API](/api/programmatic/debugger) for full details.
+  </Accordion>
+
+  <Accordion title="Can I live-edit JavaScript on a running page?">
+    Yes, using the editor API:
+    
+    ```bash
+    # Initialize editor
+    playwriter -s 1 -e '
+      state.cdp = await getCDPSession({ page })
+      state.editor = createEditor({ cdp: state.cdp })
+      await state.editor.enable()
+    '
+    
+    # Edit a script
+    playwriter -s 1 -e '
+      await state.editor.edit({
+        url: "https://example.com/app.js",
+        oldString: "const DEBUG = false",
+        newString: "const DEBUG = true"
+      })
+    '
+    ```
+    
+    Changes take effect immediately without reloading the page. See [Editor API](/api/programmatic/editor) for more.
+  </Accordion>
+
+  <Accordion title="How do I intercept network requests?">
+    Use Playwright's route API:
+    
+    ```bash
+    # Intercept and modify requests
+    playwriter -s 1 -e '
+      await page.route("**/api/**", route => {
+        console.log("Request:", route.request().url())
+        route.continue()
+      })
+    '
+    
+    # Block resources
+    playwriter -s 1 -e '
+      await page.route("**/*.{png,jpg,jpeg}", route => route.abort())
+    '
+    
+    # Capture responses
+    playwriter -s 1 -e '
+      state.responses = []
+      page.on("response", r => {
+        if (r.url().includes("/api/")) {
+          state.responses.push(r.url())
+        }
+      })
+    '
+    ```
+  </Accordion>
+
+  <Accordion title="Can I use Playwriter programmatically (not CLI)?">
+    Yes, use the Playwright API directly:
+    
+    ```typescript
+    import { chromium } from 'playwright-core'
+    import { startPlayWriterCDPRelayServer, getCdpUrl } from 'playwriter'
+    
+    const server = await startPlayWriterCDPRelayServer()
+    const browser = await chromium.connectOverCDP(getCdpUrl())
+    const page = browser.contexts()[0].pages()[0]
+    
+    await page.goto('https://example.com')
+    await page.screenshot({ path: 'screenshot.png' })
+    
+    // Don't call browser.close() - it closes the user's Chrome!
+    server.close()
+    ```
+    
+    Or connect to an existing server:
+    
+    ```bash
+    npx -y playwriter serve --host 127.0.0.1
+    ```
+    
+    ```typescript
+    const browser = await chromium.connectOverCDP('http://127.0.0.1:19988')
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Sessions & State
+
+<AccordionGroup>
+  <Accordion title="What is a Playwriter session?">
+    A session is an isolated execution context with its own state:
+    
+    - **Separate state**: Each session has its own `state` object
+    - **Shared tabs**: All sessions share the same browser tabs
+    - **Persistent**: State survives between execute calls
+    
+    Create sessions for different tasks to avoid state collisions:
+    
+    ```bash
+    playwriter session new  # Session 1: scraping task
+    playwriter session new  # Session 2: testing task
+    ```
+  </Accordion>
+
+  <Accordion title="How does session state work?">
+    The `state` object persists between execute calls in the same session:
+    
+    ```bash
+    # Store data in state
+    playwriter -s 1 -e 'state.counter = 0'
+    playwriter -s 1 -e 'state.counter++'
+    playwriter -s 1 -e 'console.log(state.counter)'  # Prints: 1
+    ```
+    
+    Common use cases:
+    
+    - **Store page references**: `state.page = await context.newPage()`
+    - **Accumulate data**: `state.items = []`
+    - **Maintain CDP sessions**: `state.cdp = await getCDPSession({ page })`
+    - **Keep debugger state**: `state.dbg = createDebugger({ cdp: state.cdp })`
+  </Accordion>
+
+  <Accordion title="Do sessions share browser tabs?">
+    Yes! Browser tabs are shared across all sessions:
+    
+    ```bash
+    # Session 1 creates a page
+    playwriter -s 1 -e 'await context.newPage()'
+    
+    # Session 2 can see it
+    playwriter -s 2 -e 'console.log(context.pages().length)'  # Prints: 2+
+    ```
+    
+    To avoid interference, create your own page and store it in `state`:
+    
+    ```bash
+    playwriter -s 1 -e 'state.page = await context.newPage()'
+    playwriter -s 1 -e 'await state.page.goto("https://example.com")'
+    ```
+  </Accordion>
+
+  <Accordion title="How do I reset a session if it gets stuck?">
+    Use `playwriter session reset`:
+    
+    ```bash
+    playwriter session reset 1
+    ```
+    
+    This clears the session state and reconnects to the browser. Your browser tabs are not affected.
+  </Accordion>
+
+  <Accordion title="Can I list all active sessions?">
+    Yes, use `playwriter session list`:
+    
+    ```bash
+    playwriter session list
+    # Output:
+    # Session 1: 3 state keys (page, counter, items)
+    # Session 2: 1 state keys (myPage)
+    ```
+    
+    This shows all sessions and their state keys.
+  </Accordion>
+</AccordionGroup>
+
+## Need More Help?
+
+If your question isn't answered here:
+
+- **Check the docs**: Browse the [Guides](/guides/working-with-pages) and [API Reference](/api/cli/session)
+- **View logs**: Run `playwriter logfile` and check for errors
+- **Open an issue**: Report bugs on [GitHub](https://github.com/remorses/playwriter/issues)
+- **Ask the community**: Join discussions on GitHub
+
+For security issues, see [Security](/resources/security#reporting-security-issues).

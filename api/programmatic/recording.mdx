@@ -1,0 +1,262 @@
+---
+title: 'Screen Recording'
+description: 'Record browser tabs with chrome.tabCapture API'
+---
+
+Playwriter's screen recording uses Chrome's native `tabCapture` API for high-quality video recording.
+
+<Note>
+  Recording happens in the extension context and survives page navigation. Videos are saved as WebM with VP9 codec.
+</Note>
+
+## Setup
+
+For automated recording without user interaction, Chrome must be restarted with special flags:
+
+```typescript
+import { getChromeRestartCommand } from 'playwriter'
+
+const restartCmd = getChromeRestartCommand()
+console.log(restartCmd)
+// macOS: osascript -e 'quit app "Google Chrome"' && sleep 1 && open -a "Google Chrome" --args --allowlisted-extension-id=... --auto-accept-this-tab-capture
+```
+
+<Warning>
+  This will close all Chrome windows. Save your work first!
+</Warning>
+
+Or manually click the Playwriter extension icon on the tab once to grant permission.
+
+## Functions
+
+### startRecording
+
+Starts recording a tab using Chrome's `tabCapture` API.
+
+```typescript
+import { startRecording } from 'playwriter'
+import type { RecordingState } from 'playwriter'
+
+const state: RecordingState = await startRecording({
+  page,
+  outputPath: './recording.webm',
+  frameRate: 30,
+  videoBitsPerSecond: 2500000,
+  audio: false,
+})
+
+console.log(state.isRecording)  // true
+console.log(state.startedAt)    // timestamp
+console.log(state.tabId)        // Chrome tab ID
+```
+
+**Parameters:**
+
+<ParamField path="page" type="Page" required>
+  Playwright Page instance to record
+</ParamField>
+
+<ParamField path="outputPath" type="string" required>
+  Path where the video file will be saved (relative paths resolved from cwd)
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  CDP tab session ID (pw-tab-* format). Auto-detected from `page.sessionId()` if not provided.
+</ParamField>
+
+<ParamField path="frameRate" type="number" default="30">
+  Frame rate in fps
+</ParamField>
+
+<ParamField path="videoBitsPerSecond" type="number" default="2500000">
+  Video bitrate in bps (2.5 Mbps default)
+</ParamField>
+
+<ParamField path="audioBitsPerSecond" type="number" default="128000">
+  Audio bitrate in bps (128 kbps default)
+</ParamField>
+
+<ParamField path="audio" type="boolean" default="false">
+  Include audio from the tab
+</ParamField>
+
+<ParamField path="relayPort" type="number" default="19988">
+  Relay server port
+</ParamField>
+
+**Returns:** `Promise<RecordingState>`
+
+```typescript
+export interface RecordingState {
+  isRecording: boolean
+  startedAt?: number    // Timestamp when recording started
+  tabId?: number        // Chrome tab ID being recorded
+}
+```
+
+**Throws:** Error if Chrome wasn't restarted with required flags and extension icon wasn't clicked
+
+### stopRecording
+
+Stops recording and saves the video file.
+
+```typescript
+import { stopRecording } from 'playwriter'
+
+const result = await stopRecording({ page })
+
+console.log(result.path)      // '/path/to/recording.webm'
+console.log(result.duration)  // Duration in milliseconds
+console.log(result.size)      // File size in bytes
+```
+
+**Parameters:**
+
+<ParamField path="page" type="Page" required>
+  Page that is being recorded
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  CDP tab session ID. Auto-detected from `page.sessionId()` if not provided.
+</ParamField>
+
+<ParamField path="relayPort" type="number" default="19988">
+  Relay server port
+</ParamField>
+
+**Returns:** `Promise<{ path: string; duration: number; size: number }>`
+
+### isRecording
+
+Checks if recording is currently active for a tab.
+
+```typescript
+import { isRecording } from 'playwriter'
+
+const state = await isRecording({ page })
+
+if (state.isRecording) {
+  console.log('Started at:', state.startedAt)
+  console.log('Tab ID:', state.tabId)
+}
+```
+
+**Parameters:**
+
+<ParamField path="page" type="Page" required>
+  Page to check
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  CDP tab session ID
+</ParamField>
+
+<ParamField path="relayPort" type="number" default="19988">
+  Relay server port
+</ParamField>
+
+**Returns:** `Promise<RecordingState>`
+
+### cancelRecording
+
+Cancels recording without saving the video.
+
+```typescript
+import { cancelRecording } from 'playwriter'
+
+await cancelRecording({ page })
+```
+
+**Parameters:**
+
+<ParamField path="page" type="Page" required>
+  Page being recorded
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  CDP tab session ID
+</ParamField>
+
+<ParamField path="relayPort" type="number" default="19988">
+  Relay server port
+</ParamField>
+
+## Complete Example
+
+```typescript
+import { chromium } from 'playwright-core'
+import {
+  startPlayWriterCDPRelayServer,
+  getCdpUrl,
+  startRecording,
+  stopRecording,
+  isRecording,
+} from 'playwriter'
+
+const server = await startPlayWriterCDPRelayServer()
+const browser = await chromium.connectOverCDP(getCdpUrl())
+const context = browser.contexts()[0]
+const page = context.pages()[0]
+
+// Start recording
+await startRecording({
+  page,
+  outputPath: './demo.webm',
+  frameRate: 30,
+  videoBitsPerSecond: 2500000,
+})
+
+// Perform actions
+await page.goto('https://example.com')
+await page.click('button')
+await page.fill('input', 'test')
+
+// Check status
+const status = await isRecording({ page })
+console.log('Recording:', status.isRecording)
+
+// Stop and save
+const result = await stopRecording({ page })
+console.log(`Saved: ${result.path} (${result.size} bytes, ${result.duration}ms)`)
+
+server.close()
+```
+
+## Recording Quality
+
+Playwriter recording is **100x more efficient** than Playwright's video recording:
+
+- **Playwright**: Sends base64-encoded images for every frame over CDP
+- **Playwriter**: Uses native `chrome.tabCapture` API with efficient WebM/VP9 encoding
+
+Recommended settings:
+
+```typescript
+await startRecording({
+  page,
+  outputPath: './recording.webm',
+  frameRate: 30,              // 30fps for smooth playback
+  videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+  audio: false,                // Enable if you need tab audio
+})
+```
+
+For higher quality:
+
+```typescript
+await startRecording({
+  page,
+  outputPath: './recording.webm',
+  frameRate: 60,
+  videoBitsPerSecond: 5000000, // 5 Mbps
+})
+```
+
+## Troubleshooting
+
+If recording fails with "Extension has not been invoked" or "activeTab" error:
+
+1. **Manual method**: Click the Playwriter extension icon on the tab once
+2. **Automated method**: Restart Chrome with the command from `getChromeRestartCommand()`
+
+The recording survives page navigation and continues until you call `stopRecording()` or `cancelRecording()`.

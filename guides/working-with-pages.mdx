@@ -1,0 +1,254 @@
+---
+title: Working with pages
+description: Best practices for managing browser pages and avoiding session interference in Playwriter
+---
+
+## Overview
+
+In Playwriter, **pages are shared across all sessions**, but **state is session-isolated**. This means multiple agents or sessions can interact with the same browser tabs, which requires careful page management to avoid interference.
+
+## The state.page pattern
+
+Always store your page reference in `state.page` at the start of each task:
+
+```javascript
+// Find an available about:blank page or create a new one
+state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+
+// Navigate to your target URL
+await state.page.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+```
+
+<Warning>
+Do NOT use the default `page` variable directly — it may be shared with other agents and can lead to race conditions.
+</Warning>
+
+## Reusing vs creating pages
+
+**Reuse about:blank pages** when possible to avoid accumulating tabs:
+
+```javascript
+// ✅ Good: reuse existing about:blank or create new
+state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+
+// ❌ Bad: always creating new pages clutters the browser
+state.page = await context.newPage()
+```
+
+**Create new pages** when you need isolation:
+
+```javascript
+// Create a dedicated page for this task
+state.myPage = await context.newPage()
+await state.myPage.goto('https://example.com')
+
+// Store multiple pages for parallel work
+state.pages = {
+  main: await context.newPage(),
+  helper: await context.newPage()
+}
+```
+
+## Page lifecycle
+
+### Navigation
+
+Always use `waitUntil: 'domcontentloaded'` for faster navigation:
+
+```javascript
+await state.page.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+
+// Wait for specific content if needed
+await state.page.waitForSelector('article', { timeout: 10000 })
+
+// Or use the waitForPageLoad helper
+await waitForPageLoad({ page: state.page, timeout: 5000 })
+```
+
+### Checking page state
+
+Always verify the page loaded correctly before interacting:
+
+```javascript
+// Print URL to confirm navigation
+console.log('Current URL:', state.page.url())
+
+// Take snapshot to see page content
+await snapshot({ page: state.page }).then(console.log)
+```
+
+### Closing pages
+
+<Warning>
+NEVER call `browser.close()` or `context.close()` — this will close the user's entire Chrome instance!
+</Warning>
+
+Only close pages you explicitly created:
+
+```javascript
+// ✅ OK: close a page you created
+if (state.myPage) {
+  await state.myPage.close()
+  delete state.myPage
+}
+
+// ❌ NEVER: this closes the entire browser
+await browser.close() // DON'T DO THIS!
+await context.close() // DON'T DO THIS!
+```
+
+## Avoiding interference
+
+### Session isolation
+
+Each session has its own `state` object, but all sessions share the same browser pages:
+
+```javascript
+// Session 1
+state.page = await context.newPage() // creates page A
+state.myData = 'session 1 data' // isolated to session 1
+
+// Session 2
+state.page = await context.newPage() // creates page B (different from A)
+state.myData = 'session 2 data' // isolated to session 2
+
+// Both sessions can see ALL pages
+context.pages() // returns [A, B, ...other tabs]
+```
+
+### Event listeners
+
+Always clean up event listeners to prevent cross-session interference:
+
+```javascript
+// Set up listener for your session
+state.page.on('response', (res) => {
+  if (res.url().includes('/api/')) {
+    console.log('API call:', res.url())
+  }
+})
+
+// At end of message, remove all listeners
+state.page.removeAllListeners()
+```
+
+### Background pages
+
+<Note>
+You can interact with pages in the background — no need to call `bringToFront()` unless the user explicitly asks for it.
+</Note>
+
+```javascript
+// ✅ Works fine: interact with background page
+await state.page.click('button')
+await state.page.type('input', 'text')
+
+// ❌ Avoid: unnecessary and disruptive
+await state.page.bringToFront() // Don't do this
+```
+
+## Multiple pages pattern
+
+When working with multiple pages simultaneously:
+
+```javascript
+// Store multiple pages in state
+state.pages = {
+  main: context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage()),
+  helper: await context.newPage()
+}
+
+// Navigate both
+await state.pages.main.goto('https://example.com')
+await state.pages.helper.goto('https://api.example.com/docs')
+
+// Work with each independently
+await snapshot({ page: state.pages.main })
+await snapshot({ page: state.pages.helper })
+
+// Clean up at end
+await state.pages.helper.close()
+delete state.pages.helper
+```
+
+## Finding existing pages
+
+Search for pages by URL or title:
+
+```javascript
+// Find page by URL
+const githubPage = context.pages().find((p) => p.url().includes('github.com'))
+
+if (githubPage) {
+  state.page = githubPage
+  await snapshot({ page: state.page })
+} else {
+  // Create new page if not found
+  state.page = await context.newPage()
+  await state.page.goto('https://github.com')
+}
+
+// Find page by title
+const pages = context.pages()
+for (const page of pages) {
+  const title = await page.title()
+  console.log(`${page.url()} - ${title}`)
+}
+```
+
+## Common pitfalls
+
+### Using the default page variable
+
+```javascript
+// ❌ Bad: default page may be shared with other agents
+await page.goto('https://example.com')
+
+// ✅ Good: use your own page stored in state
+state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+await state.page.goto('https://example.com')
+```
+
+### Not checking which page has focus
+
+```javascript
+// ❌ Bad: assuming state.page is still on the right URL
+await state.page.click('button')
+
+// ✅ Good: verify URL first
+console.log('Current URL:', state.page.url())
+if (state.page.url().includes('expected-domain.com')) {
+  await state.page.click('button')
+}
+```
+
+### Creating too many pages
+
+```javascript
+// ❌ Bad: creates a new tab every time
+for (let i = 0; i < 10; i++) {
+  const page = await context.newPage()
+  await page.goto(`https://example.com/${i}`)
+  // ... do work ...
+  // Forgot to close!
+}
+
+// ✅ Good: reuse one page
+state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+
+for (let i = 0; i < 10; i++) {
+  await state.page.goto(`https://example.com/${i}`)
+  // ... do work ...
+}
+```
+
+## Best practices summary
+
+1. **Always store your page in state.page** at the start of each task
+2. **Reuse about:blank pages** when possible
+3. **Never close browser or context** — only close pages you created
+4. **Don't call bringToFront()** unless explicitly requested
+5. **Clean up event listeners** with `removeAllListeners()` at end of message
+6. **Verify page URL** before important interactions
+7. **Use waitForLoadState('domcontentloaded')** for faster navigation
+8. **Take snapshots** to verify page state after navigation and actions

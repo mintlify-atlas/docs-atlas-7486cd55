@@ -1,0 +1,199 @@
+---
+title: Changelog
+description: Latest updates and changes to Playwriter
+---
+
+This changelog combines updates from both the Playwriter MCP/CLI package and the Chrome extension.
+
+## Playwriter 0.0.80 (Latest)
+
+### Improvements
+
+- **Descriptive click timeout errors**: When `locator.click()` times out due to actionability failures, the error now includes the reason (e.g. "Element is not visible", "Element is not stable", "button intercepts pointer events") instead of just "Timeout exceeded."
+- **Faster action timeouts for agents**: Default Playwright action timeout reduced from 10s to 2s. Navigation timeout remains at 10s. Agents now get fast failure with descriptive errors instead of waiting 10 seconds for a generic timeout.
+
+## Playwriter 0.0.79
+
+### Improvements
+
+- **Faster ghost cursor motion defaults**: Reduced min/max movement durations and increased base movement speed so pointer travel feels snappier while preserving smooth easing.
+- **Recording docs now emphasize interaction-driven navigation**: Updated skill guidance to prefer click/type/hover flows during recordings so ghost cursor motion is visible and human-like instead of bypassed by direct `goto` jumps.
+
+## Playwriter 0.0.78
+
+### Features
+
+- **Add `resizeImage` sandbox utility**: Standalone function to resize images, useful for shrinking screenshots before reading them back into context. Default LLM-optimal mode fits within 1568×1568px; also supports explicit width/height/maxDimension. Available in execute sandbox alongside other utilities.
+
+## Playwriter 0.0.77
+
+### Improvements
+
+- **Cap speed-up output to source fps in FFmpeg pipeline**: Speed-up filters now use explicit `fps=fps=<source>:round=down` and set output `-r` to the same probed frame rate, keeping accelerated sections bounded to the recording's native fps.
+
+## Playwriter 0.0.76
+
+### Bug Fixes
+
+- **Fix ultra-short/slow demo generation on variable-framerate recordings**: `probeVideo()` now prefers `avg_frame_rate` and clamps output FPS to sane bounds, avoiding accidental `fps=30000` filter chains.
+- **Avoid speeding entire video when no execute timestamps exist**: `computeIdleSections()` now returns no idle sections when timestamps are empty, so `createDemoVideo()` preserves original speed instead of aggressively compressing full recordings.
+
+## Playwriter 0.0.75
+
+### Improvements
+
+- **Switch minimal cursor to triangular pointer icon**: Updated the `minimal` ghost cursor style to use a stylized triangular SVG pointer (with subtle drop shadow) instead of the circular indicator, while keeping `dot` and `screenstudio` styles available.
+
+## Extension 0.0.72
+
+### Bug Fixes
+
+- **Use runtime-scoped root CDP tab session IDs**: Root tab sessions now use `pw-tab-<scope>-<n>` instead of `pw-tab-<n>`, where scope is a random value generated once per extension runtime. This prevents session ID collisions across multiple connected Chrome profiles.
+
+## Playwriter 0.0.72
+
+### Improvements
+
+- **Reduce false "extension disconnected" on relay restarts**: `playwriter session new` now waits longer for extension reconnect and adds a short polling grace window before failing, preventing transient post-restart races from surfacing as hard disconnect errors.
+
+## Extension 0.0.71
+
+### Bug Fixes
+
+- **Route Runtime.enable to child CDP sessions**: Runtime enable/disable now uses the incoming `sessionId` when targeting OOPIF child sessions instead of always using the tab root session. This fixes missing `Runtime.executionContextCreated` events for child iframe targets, which could cause iframe locator operations to hang.
+
+## Playwriter 0.0.71
+
+### Features
+
+- **Add `recording` and `ghostCursor` namespaces in execute context**: New `recording.start/stop/isRecording/cancel` and `ghostCursor.show/hide` APIs are now exposed for cleaner scripting while keeping `startRecording`, `stopRecording`, `isRecording`, and `cancelRecording` as backward-compatible aliases.
+- **Manual cursor overlay controls**: Cursor overlay can now be shown/hidden explicitly outside recording flows for screenshot and demo generation.
+
+## Playwriter 0.0.70
+
+### Features
+
+- **Ghost cursor overlay during recording**: Playwriter now auto-enables a smooth in-page ghost cursor when `startRecording()` is called, driven by `page.onMouseAction` callbacks from the Playwright fork so both `page.mouse.*` and `locator.click()` actions are visualized.
+
+### Tests
+
+- **Add ghost-cursor integration coverage**: Extended `on-mouse-action.test.ts` to verify callback-driven cursor animation and teardown in real extension-connected runs.
+
+## Extension 0.0.69
+
+### Features
+
+- **First extension keeps connection**: When multiple Playwriter extensions are installed, the actively-used one (with tabs) now keeps the connection. New extensions are rejected with code 4002 instead of taking over.
+- **Smarter reconnection**: Extension now polls `/extension/status` for `activeTargets` count and only attempts reconnection when the other extension has no active tabs.
+
+### Bug Fixes
+
+- **Proper state handling for 4002 rejection**: Fixed issue where extension would keep retrying forever when rejected during WebSocket handshake. Now correctly enters `extension-replaced` polling state.
+
+## Playwriter 0.0.69
+
+### Bug Fixes
+
+- **Scope CDP tab session IDs by extension runtime**: Switched root tab IDs to `pw-tab-<scope>-<n>` so concurrent extension connections do not reuse the same `pw-tab-1`, `pw-tab-2`, etc. The scope is generated once per extension runtime to avoid cross-profile collisions and ambiguous recording-route resolution.
+- **Standardize recording routes on CDP `sessionId`**: Recording HTTP routes now treat `sessionId` as a CDP tab session ID (`pw-tab-*`) only, removing executor-target branching from the recording path.
+
+## Extension 0.0.68
+
+### Bug Fixes
+
+- **Improved connection reliability**: Use `127.0.0.1` instead of `localhost` to avoid DNS/IPv6 resolution issues
+- **Global connection timeout**: Added 15-second global timeout wrapper around `connect()` to prevent hanging forever when individual timeouts fail
+- **Better WebSocket handling**: Added `settled` flag to properly handle timeout/open/error/close race conditions
+
+### Changes
+
+- **Faster retry loop**: Reduced retry attempts from 30 to 5 since `maintainLoop` retries every 3 seconds anyway
+- **Allow own extension pages**: Added `OUR_EXTENSION_IDS` to allow attaching to our own extension pages while blocking other extensions
+
+## Playwriter 0.0.63
+
+### Security
+
+- **Harden privileged HTTP routes against cross-origin attacks**: Added route-level middleware on `/cli/*` and `/recording/*` that blocks cross-origin browser requests via `Sec-Fetch-Site` header validation, rejects POST requests without `Content-Type: application/json` (prevents the CORS preflight bypass via `text/plain`), and enforces token authentication when token mode is enabled.
+- **Token enforcement on HTTP routes**: When `--token` is set (remote access mode), `/cli/*` and `/recording/*` routes now require `Authorization: Bearer <token>` or `?token=<token>`, matching the behavior already documented in remote-access.md.
+- **Security regression tests**: Added tests covering Sec-Fetch-Site blocking, Content-Type enforcement, token validation on privileged routes, and pass-through for legitimate Node.js clients.
+
+## Playwriter 0.0.62
+
+### Features
+
+- **Remote access support**: `PLAYWRITER_HOST` now accepts full URLs (e.g., `https://x-tunnel.traforo.dev`) in addition to plain hostnames, enabling secure remote browser access through tunnels like traforo
+- **WebSocket over HTTPS**: Automatically uses `wss://` protocol when connecting to HTTPS relay hosts
+- **Remote access documentation**: Added comprehensive guide covering architecture, setup, use cases, and security model for remote Playwriter access
+
+### Internal
+
+- **Centralized host parsing**: New `parseRelayHost()` utility handles URL/hostname detection and returns correct HTTP/WebSocket base URLs
+
+## Playwriter 0.0.57
+
+### Features
+
+- **Ghost Browser Support**: Added integration with Ghost Browser APIs (multi-identity, proxies)
+- **Multi-browser Support**: Added support for connecting to multiple browser instances/extensions
+- **Screen Recording**: Added concurrent screen recording support in MP4 format (requires extension update)
+- **Iframe Handling**: Improved iframe targeting using `Frame` objects and `Runtime.enable` routing
+- **Accessibility Snapshots**: Added support for inline locators and better filtering
+- **CDP JSONL Logging**: Added structured CDP logging to `~/.playwriter/cdp.jsonl`
+
+### Bug Fixes
+
+- **Fix hung navigations on YouTube and similar sites**: Resume filtered targets (like service workers) to avoid blocking navigations
+- **Fix tab group infinite loop**: Prevent infinite loop when dragging tabs
+- **Fix log dir permissions on shared machines**: Move default log directory from `/tmp/playwriter` to `~/.playwriter` so each OS user gets their own directory. Fixes startup crash when `/tmp/playwriter` is owned by another user.
+
+## Playwriter 0.0.52
+
+### Features
+
+- **First extension keeps connection**: When multiple Playwriter extensions are installed (e.g., dev and prod), the first one with active tabs now keeps the connection instead of being replaced by newer connections. Idle extensions (no tabs) can still be replaced.
+- **Smarter extension slot detection**: `/extension/status` endpoint now returns `activeTargets` count, allowing extensions to know when the slot becomes available (no active tabs).
+- **Accessibility snapshot format options**: `accessibilitySnapshot` now supports `format` option (`'yaml'` or `'markdown'`) with deduplication of interactive refs
+- **Session management CLI commands**: New CLI commands for managing relay sessions (`playwriter sessions list`, `playwriter sessions kill`)
+- **Eval CLI flag**: New `-e/--eval` CLI flag for quick code execution from command line
+
+### Security
+
+- **Block browser access to CLI endpoints**: Prevents browsers from accessing CLI-specific endpoints
+
+## Playwriter 0.0.48
+
+### Bug Fixes
+
+- **Fix SSE streaming**: CDP's Network domain buffers response bodies by default, which breaks SSE/streaming - data arrives at Chrome but `ReadableStream` never receives it. Now `Network.enable` defaults to `maxTotalBufferSize: 0` to disable buffering.
+
+### Features
+
+- **Auto-switch to another page when default page is closed**: When the current page is closed, MCP automatically switches to another available page instead of erroring
+- **Optimized screenshot token usage**: Screenshots are now resized with sharp to reduce Claude token consumption
+
+## Playwriter 0.0.40
+
+### Features
+
+- **`screenshotWithAccessibilityLabels`**: New utility function that takes a screenshot with Vimium-style visual labels overlaid on interactive elements
+  - Labels show aria-ref IDs that can be used with `page.locator('aria-ref=e5')`
+  - Image and accessibility snapshot are automatically included in the response
+  - Labels are color-coded by element type
+- **Media elements in aria labels**: Added `img`, `video`, `audio` to interactive roles with light blue color scheme
+
+## Playwriter 0.0.36
+
+### Features
+
+- **Visual Aria Ref Labels**: New `showAriaRefLabels()` and `hideAriaRefLabels()` functions overlay Vimium-style labels on interactive elements
+  - Labels show aria-ref IDs (e.g., "e1", "e5") that can be used with `page.locator('aria-ref=e5')`
+  - Color-coded by element type: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=sliders, salmon=menus, amber=tabs
+  - Auto-hides after 30 seconds
+
+## Earlier Versions
+
+For complete version history, see:
+
+- [Playwriter CHANGELOG.md](https://github.com/remorses/playwriter/blob/main/playwriter/CHANGELOG.md)
+- [Extension CHANGELOG.md](https://github.com/remorses/playwriter/blob/main/extension/CHANGELOG.md)

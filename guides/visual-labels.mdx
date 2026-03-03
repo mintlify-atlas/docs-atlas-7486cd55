@@ -1,0 +1,295 @@
+---
+title: Visual labels
+description: Vimium-style accessibility labels that make it easy for AI agents to identify and interact with page elements
+---
+
+## Overview
+
+Playwriter's visual labels provide a Vimium-style overlay system that assigns short alphanumeric codes to interactive elements on the page. This makes it easy for AI agents (and humans) to reference specific elements without complex selectors.
+
+## How visual labels work
+
+When you call `screenshotWithAccessibilityLabels()`, Playwriter:
+
+1. Analyzes the page's accessibility tree
+2. Identifies all interactive elements (buttons, links, inputs, etc.)
+3. Generates short, unique labels (e.g., "e5", "e12", "e23")
+4. Overlays these labels on a screenshot
+5. Returns both the labeled screenshot and a text snapshot with `aria-ref` selectors
+
+## Taking a labeled screenshot
+
+```javascript
+// Navigate to page
+state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+await state.page.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+
+// Get screenshot with labels
+const result = await screenshotWithAccessibilityLabels({ page: state.page })
+
+// Returns:
+// - screenshot (Buffer): PNG image with labels overlaid
+// - snapshot (string): Text representation with aria-ref selectors
+```
+
+<Note>
+The function returns both a visual screenshot with labels AND a text snapshot containing the same aria-ref identifiers.
+</Note>
+
+## Using aria-ref selectors
+
+Once you have labels, use them with the `aria-ref` selector:
+
+```javascript
+// Take labeled screenshot to see labels
+await screenshotWithAccessibilityLabels({ page: state.page })
+// Returns: ... button "Sign In" [aria-ref=e5] ...
+
+// Click the element with label e5
+await state.page.locator('aria-ref=e5').click()
+```
+
+## Color coding system
+
+Labels are color-coded by element type to provide visual context:
+
+| Color | Element Type | Example |
+|-------|--------------|----------|
+| **Yellow** | Links | Navigation links, anchor tags |
+| **Orange** | Buttons | Submit buttons, action buttons |
+| **Coral** | Text inputs | Email, password, search fields |
+| **Pink** | Checkboxes | Selection boxes, toggles |
+| **Peach** | Sliders | Range inputs, volume controls |
+| **Salmon** | Menus | Dropdowns, context menus |
+| **Amber** | Tabs | Tab navigation, tab panels |
+
+## Complete workflow example
+
+<Steps>
+  <Step title="Navigate to page">
+    ```javascript
+    state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+    await state.page.goto('https://github.com/login', { waitUntil: 'domcontentloaded' })
+    ```
+  </Step>
+  
+  <Step title="Take labeled screenshot">
+    ```javascript
+    const result = await screenshotWithAccessibilityLabels({ page: state.page })
+    // Visual screenshot shows:
+    // - "Username" input with coral label [e5]
+    // - "Password" input with coral label [e7]
+    // - "Sign in" button with orange label [e12]
+    ```
+  </Step>
+  
+  <Step title="Use labels to interact">
+    ```javascript
+    // Fill username (coral label e5)
+    await state.page.locator('aria-ref=e5').fill('myusername')
+    
+    // Fill password (coral label e7)
+    await state.page.locator('aria-ref=e7').fill('mypassword')
+    
+    // Click sign in (orange label e12)
+    await state.page.locator('aria-ref=e12').click()
+    ```
+  </Step>
+  
+  <Step title="Verify result">
+    ```javascript
+    await state.page.waitForLoadState('domcontentloaded')
+    console.log('Current URL:', state.page.url())
+    await snapshot({ page: state.page })
+    ```
+  </Step>
+</Steps>
+
+## When to use visual labels
+
+### Use visual labels when:
+
+- **Visual layout matters** — need to understand spatial relationships
+- **Complex UIs** — many similar elements that are hard to distinguish by text alone
+- **Debugging interactions** — want to verify you're clicking the right element
+- **Visual verification needed** — need to confirm button colors, positions, visibility
+
+```javascript
+// Good use case: distinguishing between multiple buttons
+await screenshotWithAccessibilityLabels({ page: state.page })
+// Shows three "Delete" buttons with different positions and labels
+// Can now click the specific one by its label
+await state.page.locator('aria-ref=e15').click()
+```
+
+### Use text snapshots when:
+
+- **Reading content** — extracting text, checking if elements exist
+- **Fast feedback** — no need to analyze images
+- **Token efficiency** — text snapshots are 5-20KB vs screenshots at 100KB+
+- **Element finding** — searching for specific text or roles
+
+```javascript
+// Good use case: checking if login was successful
+await snapshot({ page: state.page, search: /welcome|dashboard/i })
+// Fast, cheap, no image tokens needed
+```
+
+<Tip>
+Always try `snapshot()` first before using `screenshotWithAccessibilityLabels()`. Screenshots are more expensive in both time and tokens.
+</Tip>
+
+## Programmatic label management
+
+You can also manage labels programmatically without screenshots:
+
+### Show labels on page
+
+```javascript
+// Add labels to page (without taking screenshot)
+await showAriaRefLabels({ page: state.page })
+// Labels now visible in the browser
+// Useful for debugging while watching the browser
+```
+
+### Hide labels
+
+```javascript
+// Remove labels from page
+await hideAriaRefLabels({ page: state.page })
+```
+
+### Get snapshot with aria-ref
+
+Get just the text snapshot with aria-ref selectors (no screenshot):
+
+```javascript
+const result = await getAriaSnapshot(state.page)
+console.log(result.snapshot) // Text with aria-ref selectors
+// Find element by parsing the snapshot text
+```
+
+## Advanced usage
+
+### Scoped screenshots
+
+Take a labeled screenshot of a specific region:
+
+```javascript
+// Take snapshot of a specific area
+const modal = state.page.locator('.modal-dialog')
+const result = await screenshotWithAccessibilityLabels({ 
+  page: state.page,
+  locator: modal 
+})
+// Shows only labels within the modal
+```
+
+### Labels in iframes
+
+Visual labels work in iframes too:
+
+```javascript
+const frame = state.page.frames().find((f) => f.url().includes('widget.example.com'))
+
+if (frame) {
+  // Get labeled screenshot of iframe content
+  const result = await screenshotWithAccessibilityLabels({ 
+    page: state.page,
+    frame 
+  })
+  
+  // Use aria-ref within the frame
+  await frame.locator('aria-ref=e8').click()
+}
+```
+
+### Combining with search
+
+Get a labeled screenshot focused on specific elements:
+
+```javascript
+// Take screenshot and also get filtered snapshot
+const result = await screenshotWithAccessibilityLabels({ page: state.page })
+
+// Also get text snapshot with search filter
+const filtered = await snapshot({ 
+  page: state.page, 
+  search: /submit|send|post/i 
+})
+// Shows only elements matching the search pattern
+```
+
+## Label lifecycle
+
+Labels are stable within a single page state but change when:
+
+- **Page navigation** — labels reset on new page load
+- **DOM changes** — dynamic content may get new labels
+- **Re-taking screenshot** — labels may be reassigned
+
+<Warning>
+Always take a fresh labeled screenshot before clicking if the page has changed. Stale labels may point to wrong elements.
+</Warning>
+
+```javascript
+// ❌ Bad: using old labels after page change
+await screenshotWithAccessibilityLabels({ page: state.page })
+// ... page content changes ...
+await state.page.locator('aria-ref=e5').click() // May click wrong element!
+
+// ✅ Good: fresh screenshot after changes
+await screenshotWithAccessibilityLabels({ page: state.page })
+await state.page.locator('aria-ref=e5').click()
+// ... page changes ...
+await screenshotWithAccessibilityLabels({ page: state.page }) // Fresh labels
+await state.page.locator('aria-ref=e12').click() // Correct element
+```
+
+## Common use cases
+
+### Finding specific button among many
+
+```javascript
+// Page has multiple "Delete" buttons
+await screenshotWithAccessibilityLabels({ page: state.page })
+// Screenshot shows:
+// - "Delete" [e5] - next to item 1
+// - "Delete" [e8] - next to item 2  
+// - "Delete" [e11] - next to item 3
+
+// Click the specific one
+await state.page.locator('aria-ref=e8').click()
+```
+
+### Verifying element visibility
+
+```javascript
+// Check if sidebar toggle is visible
+await screenshotWithAccessibilityLabels({ page: state.page })
+// Look at screenshot to verify button is visible and accessible
+// If label appears, element is visible and interactive
+```
+
+### Complex form navigation
+
+```javascript
+// Large form with many inputs
+await screenshotWithAccessibilityLabels({ page: state.page })
+// Screenshot shows all fields with labels
+// Fill form using labels:
+await state.page.locator('aria-ref=e5').fill('John')
+await state.page.locator('aria-ref=e7').fill('Doe')
+await state.page.locator('aria-ref=e9').fill('john@example.com')
+await state.page.locator('aria-ref=e15').click() // Submit
+```
+
+## Best practices
+
+1. **Try text snapshot first** — cheaper and faster than screenshots
+2. **Use for visual verification** — when layout and positioning matter
+3. **Retake after page changes** — don't reuse stale labels
+4. **Color coding helps** — use colors to identify element types quickly
+5. **Combine with text snapshots** — use screenshot for layout, text for content
+6. **Clean up afterward** — hide labels with `hideAriaRefLabels()` if shown programmatically
+7. **Handle label not found** — elements may appear/disappear dynamically

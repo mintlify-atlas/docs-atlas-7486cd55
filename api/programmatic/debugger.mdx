@@ -1,0 +1,396 @@
+---
+title: 'Debugger'
+description: 'Debug JavaScript with breakpoints, stepping, and variable inspection'
+---
+
+The Debugger class provides full JavaScript debugging capabilities via Chrome DevTools Protocol.
+
+## Creating a Debugger
+
+```typescript
+import { getCDPSessionForPage, Debugger } from 'playwriter'
+import type { ICDPSession } from 'playwriter'
+
+const cdp: ICDPSession = await getCDPSessionForPage({ page })
+const dbg = new Debugger({ cdp })
+
+// Enable the debugger (called automatically by other methods)
+await dbg.enable()
+```
+
+**Constructor:**
+
+<ParamField path="cdp" type="ICDPSession" required>
+  CDP session instance from `getCDPSessionForPage`
+</ParamField>
+
+## Methods
+
+### enable
+
+Enables the debugger and runtime domains. Called automatically by other methods.
+
+```typescript
+await dbg.enable()
+```
+
+Also resumes execution if the target was started with `--inspect-brk`.
+
+### setBreakpoint
+
+Sets a breakpoint at a file and line number.
+
+```typescript
+const breakpointId: string = await dbg.setBreakpoint({
+  file: 'https://example.com/app.js',
+  line: 42
+})
+
+// Conditional breakpoint - only pause when expression is true
+await dbg.setBreakpoint({
+  file: 'https://example.com/app.js',
+  line: 42,
+  condition: 'userId === 123'
+})
+```
+
+**Parameters:**
+
+<ParamField path="file" type="string" required>
+  Script URL from `listScripts()` (e.g., `https://example.com/app.js`)
+</ParamField>
+
+<ParamField path="line" type="number" required>
+  Line number to break at (1-based)
+</ParamField>
+
+<ParamField path="condition" type="string">
+  Optional JavaScript expression - only pause when it evaluates to true
+</ParamField>
+
+**Returns:** `Promise<string>` - Breakpoint ID for later removal
+
+### deleteBreakpoint
+
+Removes a breakpoint by ID.
+
+```typescript
+await dbg.deleteBreakpoint({ breakpointId: 'bp-123' })
+```
+
+**Parameters:**
+
+<ParamField path="breakpointId" type="string" required>
+  ID returned by `setBreakpoint()`
+</ParamField>
+
+### listBreakpoints
+
+Returns all active breakpoints.
+
+```typescript
+import type { BreakpointInfo } from 'playwriter'
+
+const breakpoints: BreakpointInfo[] = dbg.listBreakpoints()
+// [{ id: 'bp-123', file: 'https://example.com/app.js', line: 42 }]
+```
+
+**Returns:** `BreakpointInfo[]`
+
+```typescript
+export interface BreakpointInfo {
+  id: string       // Breakpoint ID
+  file: string     // Script URL
+  line: number     // Line number (1-based)
+}
+```
+
+### listScripts
+
+Lists available scripts where breakpoints can be set.
+
+```typescript
+import type { ScriptInfo } from 'playwriter'
+
+// List all scripts
+const scripts: ScriptInfo[] = await dbg.listScripts()
+
+// Search for specific files
+const handlers = await dbg.listScripts({ search: 'handler' })
+```
+
+**Parameters:**
+
+<ParamField path="search" type="string">
+  Optional string to filter scripts by URL (case-insensitive)
+</ParamField>
+
+**Returns:** `Promise<ScriptInfo[]>` - Up to 20 matching scripts
+
+```typescript
+export interface ScriptInfo {
+  scriptId: string  // CDP script ID
+  url: string       // Script URL
+}
+```
+
+### isPaused
+
+Returns whether execution is paused at a breakpoint.
+
+```typescript
+if (dbg.isPaused()) {
+  const vars = await dbg.inspectLocalVariables()
+}
+```
+
+**Returns:** `boolean`
+
+### getLocation
+
+Gets the current execution location when paused, including call stack and source context.
+
+```typescript
+import type { LocationInfo } from 'playwriter'
+
+const location: LocationInfo = await dbg.getLocation()
+
+console.log(location.url)          // 'https://example.com/app.js'
+console.log(location.lineNumber)   // 42
+console.log(location.callstack)    // [{ functionName: 'handleRequest', ... }]
+console.log(location.sourceContext)
+// '  40: function handleRequest(req) {
+//   41:   const data = req.body
+// > 42:   processData(data)
+//   43: }'
+```
+
+**Returns:** `Promise<LocationInfo>`
+
+```typescript
+export interface LocationInfo {
+  url: string
+  lineNumber: number
+  columnNumber: number
+  callstack: Array<{
+    functionName: string
+    url: string
+    lineNumber: number
+    columnNumber: number
+  }>
+  sourceContext: string  // Surrounding source code with current line marked
+}
+```
+
+**Throws:** Error if not paused at a breakpoint
+
+### inspectLocalVariables
+
+Inspects local variables in the current call frame.
+
+```typescript
+const vars: Record<string, unknown> = await dbg.inspectLocalVariables()
+// { myVar: 'hello', count: 42, user: { id: 123, name: 'Alice' } }
+```
+
+**Returns:** `Promise<Record<string, unknown>>`
+
+**Throws:** Error if not paused
+
+<Note>
+  String values over 1000 characters are truncated. Use `evaluate()` for full control.
+</Note>
+
+### inspectGlobalVariables
+
+Returns global lexical scope variable names.
+
+```typescript
+const globals: string[] = await dbg.inspectGlobalVariables()
+// ['myGlobal', 'CONFIG', 'API_KEY']
+```
+
+**Returns:** `Promise<string[]>`
+
+### evaluate
+
+Evaluates a JavaScript expression and returns the result.
+
+```typescript
+import type { EvaluateResult } from 'playwriter'
+
+// When paused, can access local variables
+const result: EvaluateResult = await dbg.evaluate({
+  expression: 'localVar + 1'
+})
+console.log(result.value)
+
+// Read a large string that would be truncated in inspectLocalVariables
+const full = await dbg.evaluate({ expression: 'largeStringVar' })
+```
+
+**Parameters:**
+
+<ParamField path="expression" type="string" required>
+  JavaScript expression to evaluate
+</ParamField>
+
+**Returns:** `Promise<EvaluateResult>`
+
+```typescript
+export interface EvaluateResult {
+  value: unknown
+}
+```
+
+When paused at a breakpoint, evaluates in the current stack frame scope with access to local variables. Otherwise evaluates in global scope.
+
+### Stepping
+
+Step through code execution:
+
+```typescript
+// Step over to next line (don't enter function calls)
+await dbg.stepOver()
+
+// Step into function call
+await dbg.stepInto()
+
+// Step out of current function
+await dbg.stepOut()
+```
+
+**Throws:** Error if not paused
+
+### resume
+
+Resumes execution until the next breakpoint.
+
+```typescript
+await dbg.resume()
+```
+
+**Throws:** Error if not paused
+
+### setPauseOnExceptions
+
+Configures when to pause on exceptions.
+
+```typescript
+// Pause only on uncaught exceptions
+await dbg.setPauseOnExceptions({ state: 'uncaught' })
+
+// Pause on all exceptions (caught and uncaught)
+await dbg.setPauseOnExceptions({ state: 'all' })
+
+// Never pause on exceptions
+await dbg.setPauseOnExceptions({ state: 'none' })
+```
+
+**Parameters:**
+
+<ParamField path="state" type="'none' | 'uncaught' | 'all'" required>
+  When to pause on exceptions
+</ParamField>
+
+### Blackbox Patterns
+
+Skip framework/library code when stepping:
+
+```typescript
+// Skip all node_modules
+await dbg.setBlackboxPatterns({
+  patterns: ['node_modules']
+})
+
+// Skip React and other frameworks
+await dbg.setBlackboxPatterns({
+  patterns: [
+    'node_modules/react',
+    'node_modules/react-dom',
+    'node_modules/next',
+    'webpack://',
+  ]
+})
+
+// Add a single pattern
+await dbg.addBlackboxPattern({ pattern: 'node_modules/lodash' })
+
+// Remove a pattern
+await dbg.removeBlackboxPattern({ pattern: 'node_modules/lodash' })
+
+// List current patterns
+const patterns: string[] = dbg.listBlackboxPatterns()
+```
+
+## Complete Example
+
+```typescript
+import { chromium } from 'playwright-core'
+import { startPlayWriterCDPRelayServer, getCdpUrl, getCDPSessionForPage, Debugger } from 'playwriter'
+
+const server = await startPlayWriterCDPRelayServer()
+const browser = await chromium.connectOverCDP(getCdpUrl())
+const page = browser.contexts()[0].pages()[0]
+
+await page.goto('https://example.com')
+
+const cdp = await getCDPSessionForPage({ page })
+const dbg = new Debugger({ cdp })
+
+// List available scripts
+const scripts = await dbg.listScripts({ search: 'app' })
+console.log('Scripts:', scripts.map(s => s.url))
+
+// Set a breakpoint
+const bpId = await dbg.setBreakpoint({
+  file: scripts[0].url,
+  line: 42,
+  condition: 'userId > 0'
+})
+
+// Trigger the code path (e.g., click a button)
+await page.click('button')
+
+// Wait for breakpoint to hit
+await page.waitForTimeout(1000)
+
+if (dbg.isPaused()) {
+  // Inspect current location
+  const location = await dbg.getLocation()
+  console.log('Paused at:', location.url, location.lineNumber)
+  console.log('Call stack:', location.callstack)
+  console.log('Source:\n', location.sourceContext)
+
+  // Inspect variables
+  const vars = await dbg.inspectLocalVariables()
+  console.log('Local variables:', vars)
+
+  // Evaluate expression
+  const result = await dbg.evaluate({ expression: 'userId * 2' })
+  console.log('Evaluated:', result.value)
+
+  // Resume execution
+  await dbg.resume()
+}
+
+// Remove breakpoint
+await dbg.deleteBreakpoint({ breakpointId: bpId })
+
+server.close()
+```
+
+## XHR Breakpoints
+
+Break on network requests:
+
+```typescript
+// Break on any XHR/fetch to /api/users
+await dbg.setXHRBreakpoint({ url: '/api/users' })
+
+// Remove XHR breakpoint
+await dbg.removeXHRBreakpoint({ url: '/api/users' })
+
+// List all XHR breakpoints
+const xhrBps: string[] = dbg.listXHRBreakpoints()
+```

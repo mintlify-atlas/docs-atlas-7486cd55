@@ -1,0 +1,329 @@
+---
+title: Interaction patterns
+description: The observe-act-observe loop and best practices for reliable browser automation with Playwriter
+---
+
+## The interaction feedback loop
+
+Every browser interaction should follow an **observe → act → observe** loop. After every action, you must check its result before proceeding. Never chain multiple actions blindly — the page may not have responded as expected.
+
+## Core loop
+
+The fundamental pattern for all browser interactions:
+
+<Steps>
+  <Step title="Open page">
+    Get or create your page and navigate to the target URL
+  </Step>
+  
+  <Step title="Observe">
+    Print `state.page.url()` and take an accessibility snapshot. Always print the URL so you know where you are — pages can redirect, and actions can trigger unexpected navigation.
+  </Step>
+  
+  <Step title="Check">
+    Read the snapshot and URL. If the page isn't ready (still loading, expected content missing, wrong URL), **wait and observe again** — don't act on stale or incomplete state. Only proceed when you can identify the element to interact with.
+  </Step>
+  
+  <Step title="Act">
+    Perform one action (click, type, submit)
+  </Step>
+  
+  <Step title="Observe again">
+    Print URL + snapshot to verify the action's effect. If the action didn't take effect (nothing changed, page still loading), wait and observe again before proceeding.
+  </Step>
+  
+  <Step title="Repeat">
+    Continue from step 3 until the task is complete
+  </Step>
+</Steps>
+
+## Visual diagram
+
+```
+┌─────────────────────────────────────────────┐
+│            open page + goto URL             │
+└──────────────────┬──────────────────────────┘
+                   ▼
+          ┌────────────────┐
+     ┌───►│    observe      │◄─────────────────┐
+     │    │ (url + snapshot) │                   │
+     │    └───────┬────────┘                   │
+     │            ▼                            │
+     │    ┌────────────────┐                   │
+     │    │     check       │                   │
+     │    │  (read result)  │                   │
+     │    └───┬────────┬───┘                   │
+     │  not   │        │ ready                 │
+     │  ready │        ▼                       │
+     └────────┘ ┌────────────────┐             │
+                │      act        │             │
+                │  (click/type)   │─────────────┘
+                └────────────────┘
+```
+
+## Complete example
+
+Opening a Framer plugin via the command palette. Each step is a separate execute call:
+
+### Step 1: Open page and observe
+
+```javascript
+// Get or create page and navigate
+state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+await state.page.goto('https://framer.com/projects/my-project', { waitUntil: 'domcontentloaded' })
+
+// Always print URL first
+console.log('URL:', state.page.url())
+
+// Take snapshot to see what's on the page
+await snapshot({ page: state.page }).then(console.log)
+```
+
+### Step 2: Act and observe result
+
+```javascript
+// Action: open command palette
+await state.page.keyboard.press('Meta+k')
+
+// Observe: verify dialog appeared
+console.log('URL:', state.page.url())
+await snapshot({ page: state.page, search: /dialog|Search/ }).then(console.log)
+// If dialog didn't appear, wait and observe again before retrying
+```
+
+### Step 3: Type and observe
+
+```javascript
+// Action: type search query
+await state.page.keyboard.type('MCP')
+
+// Observe: verify text appeared and results loaded
+console.log('URL:', state.page.url())
+await snapshot({ page: state.page, search: /MCP/ }).then(console.log)
+```
+
+### Step 4: Submit and observe outcome
+
+```javascript
+// Action: press Enter to open plugin
+await state.page.keyboard.press('Enter')
+await state.page.waitForTimeout(1000)
+
+// Observe: verify plugin loaded in iframe
+console.log('URL:', state.page.url())
+const frame = state.page.frames().find((f) => f.url().includes('plugins.framercdn.com'))
+await snapshot({ page: state.page, frame: frame || undefined }).then(console.log)
+// If frame not found, wait and observe again — plugin may still be loading
+```
+
+## Other ways to observe
+
+Snapshots are the primary feedback mechanism, but some actions have side effects better observed through other channels:
+
+### Console logs
+
+Check for errors or app state after an action:
+
+```javascript
+// Before action
+await state.page.click('button[type="submit"]')
+
+// Observe console for errors
+await getLatestLogs({ page: state.page, search: /error|fail/i, count: 20 })
+```
+
+### Network requests
+
+Verify API calls were made after a form submit or button click:
+
+```javascript
+// Set up listener before action
+state.page.on('response', async (res) => {
+  if (res.url().includes('/api/')) {
+    console.log(res.status(), res.url())
+  }
+})
+
+// Perform action
+await state.page.click('button[type="submit"]')
+
+// Wait for network activity
+await state.page.waitForTimeout(2000)
+
+// Clean up
+state.page.removeAllListeners()
+```
+
+### URL changes
+
+Confirm navigation happened:
+
+```javascript
+const urlBefore = state.page.url()
+await state.page.click('a[href="/dashboard"]')
+
+// Wait for navigation
+await state.page.waitForLoadState('domcontentloaded')
+
+const urlAfter = state.page.url()
+console.log(`Navigated from ${urlBefore} to ${urlAfter}`)
+```
+
+### Screenshots
+
+Only for visual layout issues (see snapshot vs screenshot in best practices):
+
+```javascript
+// Use screenshots only when you need visual/spatial information
+await state.page.click('button.toggle-sidebar')
+await screenshotWithAccessibilityLabels({ page: state.page })
+// Verify sidebar is visible/hidden visually
+```
+
+## Common mistakes
+
+### Not verifying actions succeeded
+
+```javascript
+// ❌ Bad: assume typing worked
+await state.page.keyboard.type('my text')
+await state.page.click('button[type="submit"]')
+
+// ✅ Good: verify text appeared
+await state.page.keyboard.type('my text')
+await snapshot({ page: state.page, search: /my text/ })
+// NOW click submit if text is there
+await state.page.click('button[type="submit"]')
+```
+
+### Chaining actions without feedback
+
+```javascript
+// ❌ Bad: multiple actions without checking results
+await state.page.click('.menu-button')
+await state.page.click('.submenu-item')
+await state.page.click('.action-button')
+// Which action failed if this doesn't work?
+
+// ✅ Good: observe after each action
+await state.page.click('.menu-button')
+await snapshot({ page: state.page, search: /submenu/ })
+
+await state.page.click('.submenu-item')
+await snapshot({ page: state.page, search: /action/ })
+
+await state.page.click('.action-button')
+await snapshot({ page: state.page })
+```
+
+### Using stale locators
+
+```javascript
+// ❌ Bad: using locator from old snapshot
+// (taken 5 minutes ago, page has changed)
+await state.page.locator('aria-ref=e5').click()
+
+// ✅ Good: take fresh snapshot, then use NEW locators
+await snapshot({ page: state.page, showDiffSinceLastCall: true })
+// Use the locators from THIS output
+await state.page.locator('aria-ref=e12').click() // fresh ref
+```
+
+### Assuming page content loaded
+
+```javascript
+// ❌ Bad: act immediately after goto
+await state.page.goto('https://example.com')
+await state.page.click('button') // May not exist yet!
+
+// ✅ Good: wait and verify content loaded
+await state.page.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+await state.page.waitForSelector('button', { timeout: 10000 })
+// Or use snapshot to verify
+await snapshot({ page: state.page, search: /button/ })
+await state.page.click('button')
+```
+
+## Best practices
+
+### Multiple execute calls for complex tasks
+
+Use multiple execute calls to break down complex logic — this helps understand intermediate state and isolate which action failed:
+
+```javascript
+// Call 1: Navigate and observe
+state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+await state.page.goto('https://example.com')
+console.log(await snapshot({ page: state.page }))
+```
+
+```javascript
+// Call 2: Fill form and observe
+await state.page.fill('input[name="email"]', 'user@example.com')
+await state.page.fill('input[name="password"]', 'password123')
+console.log(await snapshot({ page: state.page, search: /submit|login/ }))
+```
+
+```javascript
+// Call 3: Submit and verify result
+await state.page.click('button[type="submit"]')
+await state.page.waitForLoadState('domcontentloaded')
+console.log('URL:', state.page.url())
+console.log(await snapshot({ page: state.page }))
+```
+
+### Snapshot before screenshot
+
+Always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` when you specifically need visual/spatial information:
+
+```javascript
+// ✅ Good: snapshot first
+await snapshot({ page: state.page })
+// If you need to verify layout/CSS:
+await screenshotWithAccessibilityLabels({ page: state.page })
+
+// ❌ Bad: screenshot to check if text appeared
+await state.page.screenshot({ path: 'check.png' })
+// This wastes tokens on image analysis!
+```
+
+### Wait strategies
+
+Prefer proper waits over arbitrary timeouts:
+
+```javascript
+// ✅ Good: wait for specific condition
+await state.page.waitForSelector('.result', { timeout: 10000 })
+await state.page.waitForLoadState('networkidle')
+await waitForPageLoad({ page: state.page, timeout: 5000 })
+
+// ⚠️ Acceptable: short timeout for unpredictable events
+await state.page.waitForTimeout(1000) // popup animation
+
+// ❌ Bad: long arbitrary timeout
+await state.page.waitForTimeout(10000) // use a proper wait instead
+```
+
+### Clean up after yourself
+
+```javascript
+// Set up listeners
+state.page.on('response', (res) => {
+  // handle response
+})
+
+// ... do work ...
+
+// Clean up at end
+state.page.removeAllListeners()
+```
+
+## Pattern summary
+
+1. **Always observe before and after actions** — never assume
+2. **Use snapshots as primary feedback** — fast and cheap
+3. **Break complex tasks into multiple calls** — easier to debug
+4. **Verify page state** — check URL and content after navigation
+5. **Use fresh locators** — retake snapshots when page changes
+6. **Wait for content** — don't interact with elements that may not exist
+7. **Clean up listeners** — prevent cross-session interference

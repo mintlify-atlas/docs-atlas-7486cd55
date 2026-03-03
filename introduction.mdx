@@ -1,0 +1,154 @@
+---
+title: Introduction
+description: Let AI agents control your own Chrome browser using Playwright. Your logins, extensions, and cookies — already there.
+---
+
+Playwriter is a Chrome extension and CLI tool that lets AI agents control **your running browser** instead of spawning a fresh Chrome instance. This means your existing logins, extensions, and session state are immediately available — no setup required.
+
+<Note>
+Playwriter video recording is **100x more efficient than Playwright video recording**, which sends base64 images for every frame.
+</Note>
+
+## Why Playwriter?
+
+Other browser automation tools spawn a fresh Chrome instance for each session. This creates friction:
+
+- No login state (you're logged out of everything)
+- No extensions (ad blockers, password managers, etc.)
+- Bot detection immediately flags the session
+- Double the memory usage
+
+**Playwriter connects to your existing Chrome** instead. One browser extension, full Playwright API, everything you're already logged into.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in 2 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the extension and CLI
+  </Card>
+  <Card title="CLI usage" icon="terminal" href="/cli-usage">
+    Learn the command-line interface
+  </Card>
+  <Card title="MCP setup" icon="plug" href="/mcp-setup">
+    Connect to MCP clients
+  </Card>
+</CardGroup>
+
+## Key features
+
+### Uses your existing Chrome
+
+No separate browser window. Click the extension icon on any tab to enable automation on that tab. Your logins, cookies, and extensions work instantly.
+
+### Full Playwright API
+
+Run any Playwright code via CLI or MCP. Not limited to a fixed set of tools — if Playwright can do it, Playwriter can do it.
+
+### Session isolation
+
+Each session has isolated state. Browser tabs are shared, but state objects are sandboxed per session. Multiple agents can work simultaneously without interference.
+
+### Visual labels for AI agents
+
+Vimium-style labels overlay on interactive elements. AI agents can identify buttons, inputs, and links by reference:
+
+```javascript
+await screenshotWithAccessibilityLabels({ page })
+await page.locator('aria-ref=e5').click()
+```
+
+### Raw CDP access
+
+Full Chrome DevTools Protocol access for advanced use cases:
+
+- Set breakpoints and debug live code
+- Live-edit page scripts and CSS
+- Intercept network requests
+- Inspect computed styles
+
+### Efficient video recording
+
+Native tab capture at 30-60fps using `chrome.tabCapture`. Recording survives page navigation and includes automated cursor overlay.
+
+## Comparison with other tools
+
+### vs Playwright MCP
+
+| Feature | Playwright MCP | Playwriter |
+| --- | --- | --- |
+| Browser | Spawns new Chrome | Uses your Chrome |
+| Login state | Fresh | Already logged in |
+| Extensions | None | Your existing ones |
+| Bot detection | Always detected | Can bypass (disconnect extension) |
+| Collaboration | Separate window | Same browser as user |
+| Video recording | File-based tracing | Native tab capture (30–60fps) |
+| Raw CDP access | No | Yes |
+
+### vs BrowserMCP
+
+| Feature | BrowserMCP | Playwriter |
+| --- | --- | --- |
+| Tools | 12+ dedicated tools | 1 `execute` tool |
+| API | Limited actions | Full Playwright |
+| Context usage | High (tool schemas) | Low |
+| LLM knowledge | Must learn tools | Already knows Playwright |
+
+### vs Antigravity (Jetski)
+
+| Feature | Jetski | Playwriter |
+| --- | --- | --- |
+| Tools | 17+ tools | 1 tool |
+| Subagent | Spawns for each task | Direct execution |
+| Latency | High (agent overhead) | Low |
+
+### vs Claude Browser Extension
+
+| Feature | Claude Extension | Playwriter |
+| --- | --- | --- |
+| Agent support | Claude only | Any MCP client |
+| Windows WSL | No | Yes |
+| Context method | Screenshots (100KB+) | A11y snapshots (5-20KB) |
+| Playwright API | No | Full |
+| Debugger/breakpoints | No | Yes |
+| Live code editing | No | Yes |
+| Network interception | Limited | Full |
+| Raw CDP access | No | Yes |
+
+## How it works
+
+```
++---------------------+     +-------------------+     +-----------------+
+|   BROWSER           |     |   LOCALHOST       |     |   MCP CLIENT    |
+|                     |     |                   |     |                 |
+|  +---------------+  |     | WebSocket Server  |     |  +-----------+  |
+|  |   Extension   |<--------->  :19988         |     |  | AI Agent  |  |
+|  +-------+-------+  | WS  |                   |     |  +-----------+  |
+|          |          |     |  /extension       |     |        |        |
+|    chrome.debugger  |     |       |           |     |        v        |
+|          v          |     |       v           |     |  +-----------+  |
+|  +---------------+  |     |  /cdp/:id <--------------> |  execute  |  |
+|  | Tab 1 (green) |  |     +-------------------+  WS |  +-----------+  |
+|  | Tab 2 (green) |  |                               |        |        |
+|  | Tab 3 (gray)  |  |     Tab 3 not controlled      |  Playwright API |
++---------------------+     (no extension click)      +-----------------+
+```
+
+## Security
+
+- **Local only**: WebSocket server on `localhost:19988`
+- **Origin validation**: Only Playwriter extension IDs allowed
+- **Explicit consent**: Only tabs where you clicked the extension icon
+- **Visible automation**: Chrome shows automation banner on controlled tabs
+- **No remote access**: Malicious websites cannot connect
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install Playwriter" icon="download" href="/installation">
+    Install the extension and CLI tools
+  </Card>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Run your first automation in 2 minutes
+  </Card>
+</CardGroup>
